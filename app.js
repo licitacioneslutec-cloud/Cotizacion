@@ -24,7 +24,8 @@ var PASOS = [
   { id: "anexo",     n: 2, nombre: "Anexo del cliente" },
   { id: "armado",    n: 3, nombre: "Armado" },
   { id: "apartados", n: 4, nombre: "Apartados" },
-  { id: "entrega",   n: 5, nombre: "Entrega" }
+  { id: "insumos",   n: 5, nombre: "Insumos" },
+  { id: "entrega",   n: 6, nombre: "Entrega" }
 ];
 
 /* Roles de columna que buscamos en el encabezado del anexo */
@@ -624,6 +625,79 @@ function registrarPropio(cat, fila) {
   if (cambio) Catalogo.guardar(cat);
 }
 
+/* ------------------------------------------------------------------
+   Tableros
+   El catálogo ya trae las protecciones listadas ("3x40 A 10kA"), así que
+   aquí se eligen de una lista en vez de escribirlas y descifrarlas.
+   ------------------------------------------------------------------ */
+
+var FAM_TABLERO = ["MONOFASICO", "BIFASICO", "TRIFASICO", "DRX", "DPX"];
+
+function opcionesTablero(cat, familia) {
+  var d = (cat && cat.comp && cat.comp.tableros) || [];
+  var fam = {}, sub = {};
+  d.forEach(function (r) {
+    var f = limpia(r["Familia"]), s = txt(r["SUB-ITEM"]);
+    if (f) fam[f] = true;
+    if (familia && f !== limpia(familia)) return;
+    if (s) sub[s] = true;
+  });
+  var todas = Object.keys(fam).sort();
+  return {
+    tableros: todas.filter(function (f) { return FAM_TABLERO.indexOf(f) >= 0; }),
+    protecciones: todas.filter(function (f) { return FAM_TABLERO.indexOf(f) < 0; }),
+    subitems: Object.keys(sub).sort(function (a, b) {
+      var na = parseFloat(a), nb = parseFloat(b);
+      if (!isNaN(na) && !isNaN(nb) && na !== nb) return na - nb;
+      return a.localeCompare(b, "es");
+    })
+  };
+}
+
+function itemsTablero(cat, familia, subitem) {
+  var d = (cat && cat.comp && cat.comp.tableros) || [];
+  return d.filter(function (r) {
+    return limpia(r["Familia"]) === limpia(familia) &&
+           normSub(r["SUB-ITEM"]) === normSub(subitem);
+  });
+}
+function normSub(v) { return limpia(v).replace(/\s+/g, ""); }
+
+/* Compone una fila de tableros: el tablero base más sus protecciones */
+function componerTablero(cat, fila) {
+  var lineas = [], avisos = [];
+
+  if (fila.familia && fila.subitem) {
+    var base = itemsTablero(cat, fila.familia, fila.subitem);
+    if (!base.length) avisos.push("No hay tablero " + limpia(fila.familia) + " " + txt(fila.subitem));
+    base.forEach(function (r) {
+      lineas.push({
+        cant: aNum(r["CANT"]), cod: codClave(r["CODIGO"]),
+        desc: txt(r["DESCRIPCION"]), und: txt(r["UNIDAD"])
+      });
+    });
+  }
+
+  (fila.prot || []).forEach(function (pr, i) {
+    if (!pr.familia || !pr.subitem) return;
+    var cant = Number(pr.cantidad) || 0;
+    if (cant <= 0) return;
+    var enc = itemsTablero(cat, pr.familia, pr.subitem);
+    if (!enc.length) {
+      avisos.push("Protección " + (i + 1) + ": no existe " + limpia(pr.familia) + " " + txt(pr.subitem));
+      return;
+    }
+    enc.forEach(function (r) {
+      lineas.push({
+        cant: aNum(r["CANT"]) * cant, cod: codClave(r["CODIGO"]),
+        desc: txt(r["DESCRIPCION"]), und: txt(r["UNIDAD"])
+      });
+    });
+  });
+
+  return { lineas: lineas, aviso: avisos.length ? avisos.join(" · ") : null };
+}
+
 /* Compone todas las filas de un análisis */
 function componerAnalisis(cat, datos, p, apu) {
   var lineas = [], avisos = [], reglas = [], creados = [];
@@ -641,6 +715,12 @@ function componerAnalisis(cat, datos, p, apu) {
     var r = componerEquipo(cat, fila, p, apu);
     if (r.aviso) { avisos.push("Equipo " + (i + 1) + ": " + r.aviso); return; }
     if (r.creado) creados.push(r.creado);
+    lineas = lineas.concat(r.lineas);
+  });
+
+  ((datos && datos.TA) || []).forEach(function (fila, i) {
+    var r = componerTablero(cat, fila);
+    if (r.aviso) avisos.push("Tablero " + (i + 1) + ": " + r.aviso);
     lineas = lineas.concat(r.lineas);
   });
 
@@ -929,7 +1009,8 @@ function renderCatalogo() {
       return i.cod.toLowerCase().indexOf(q) >= 0 || (i.desc || "").toLowerCase().indexOf(q) >= 0;
     });
     if (vista.soloSin) lista = lista.filter(function (i) { return !(Number(i.precio) > 0); });
-    var muestra = lista.slice(0, 120);
+    var tope = vista.tope || 150;
+    var muestra = lista.slice(0, tope);
 
     var filas = muestra.map(function (i) {
       var tiene = Number(i.precio) > 0;
@@ -972,7 +1053,7 @@ function renderCatalogo() {
 
       '<div class="card">' +
         '<div class="chd"><span class="ct">Insumos</span>' +
-        '<span class="cn">' + lista.length + ' coinciden' + (lista.length > 120 ? " · se muestran 120" : "") + '</span></div>' +
+        '<span class="cn">' + lista.length + ' coinciden · se ven ' + muestra.length + '</span></div>' +
         '<div class="cbd" style="padding-bottom:12px">' +
           '<input class="in" id="busca" placeholder="Buscar por código o descripción" value="' + esc(vista.busca || "") + '">' +
           '<label class="lbl" style="margin-top:10px"><input type="checkbox" id="solosin"' +
@@ -984,6 +1065,11 @@ function renderCatalogo() {
           '<th style="width:44px;text-align:center" title="Importado">Imp.</th>' +
           '<th style="width:104px">Proveedor</th><th style="width:88px">Actualizado</th>' +
         '</tr></thead><tbody>' + filas + '</tbody></table></div>' +
+        (lista.length > muestra.length
+          ? '<div class="cbd" style="border-top:1px solid var(--line2);text-align:center">' +
+            '<button class="btn" id="masfilas">Ver ' + Math.min(150, lista.length - muestra.length) +
+            ' más · faltan ' + (lista.length - muestra.length) + '</button></div>'
+          : "") +
       '</div>';
   }
 
@@ -1027,13 +1113,14 @@ function renderCatalogo() {
   var b = document.getElementById("busca");
   if (b) b.oninput = function () {
     vista.busca = this.value;
+    vista.tope = 150;
     var pos = this.selectionStart;
     render();
     var n = document.getElementById("busca");
     if (n) { n.focus(); n.setSelectionRange(pos, pos); }
   };
   var s = document.getElementById("solosin");
-  if (s) s.onchange = function () { ir({ soloSin: this.checked }); };
+  if (s) s.onchange = function () { ir({ soloSin: this.checked, tope: 150 }); };
 
   /* edición directa de precio, unidad e importado */
   var editar = function (attr, aplica) {
@@ -1064,6 +1151,12 @@ function renderCatalogo() {
   editar("data-cprecio", function (it, el) { it.precio = Number(el.value) || 0; });
   editar("data-cund", function (it, el) { it.und = el.value; });
   editar("data-cimp", function (it, el) { it.imp = el.checked; });
+
+  var mf = document.getElementById("masfilas");
+  if (mf) mf.onclick = function () {
+    vista.tope = (vista.tope || 150) + 150;
+    var y = window.scrollY; render(); window.scrollTo(0, y);
+  };
 
   var act = document.getElementById("actualizar");
   if (act) act.onclick = function () { ir({ pantalla: "precios", precios: null }); };
@@ -1308,9 +1401,15 @@ function renderProyectos() {
 
   app.innerHTML = barraTop("proyectos") +
     '<header class="top"><div class="wrap topin">' +
-      '<div><div class="brand">Cotización eléctrica</div>' +
-      '<h1 class="d h1">Proyectos</h1>' +
-      '<div class="sub">Cada proyecto guarda su anexo, sus análisis y su oferta</div></div>' +
+      '<div class="marca">' +
+        '<a class="logo" href="https://www.lutec.com.co/" target="_blank" rel="noopener">' +
+          '<img src="logo.png" alt="Lutec, soluciones brillantes" width="58" height="58">' +
+        '</a>' +
+        '<div><div class="brand">Cotización eléctrica</div>' +
+        '<h1 class="d h1">Proyectos</h1>' +
+        '<div class="sub">Cada proyecto guarda su anexo, sus análisis y su oferta · ' +
+        '<a class="enlace" href="https://www.lutec.com.co/" target="_blank" rel="noopener">lutec.com.co</a></div></div>' +
+      '</div>' +
       '<div class="btnrow">' +
         '<button class="btn" id="importar">Importar respaldo</button>' +
         '<button class="btn btnp" id="nuevo">Nuevo proyecto</button>' +
@@ -1504,7 +1603,8 @@ function renderProyecto() {
     vista.paso === "ficha" ? vFicha(p, r) :
     vista.paso === "anexo" ? vAnexo(p) :
     vista.paso === "armado" ? vArmado(p, r) :
-    vista.paso === "apartados" ? vApartados(p) : vEntrega(p);
+    vista.paso === "apartados" ? vApartados(p) :
+    vista.paso === "insumos" ? vInsumos(p) : vEntrega(p);
 
   app.innerHTML =
     '<div class="tira"><div class="wrap tirain">' +
@@ -1535,6 +1635,7 @@ function renderProyecto() {
   if (vista.paso === "anexo") enlazarAnexo(p);
   if (vista.paso === "armado") enlazarArmado(p);
   if (vista.paso === "apartados") enlazarApartados(p);
+  if (vista.paso === "insumos") enlazarInsumos(p);
   if (vista.paso === "entrega") enlazarEntrega(p);
 }
 
@@ -2025,6 +2126,59 @@ function panelApu(p, cat, act) {
       '<button class="btn" id="masEQ">+ Agregar equipo</button></div></div>';
   }
 
+  /* --- formulario de tableros --- */
+  var filasTA = datos.TA || [];
+  var formTA = "";
+  if (act.cod.indexOf("TA") >= 0) {
+    var bloquesTA = filasTA.map(function (f, i) {
+      var op = opcionesTablero(cat, f.familia);
+      var selT = function (campo, valor, opciones, deshab) {
+        return '<select class="in" data-ta="' + i + '|' + campo + '"' + (deshab ? " disabled" : "") + '>' +
+          '<option value="">' + (deshab ? "\u2014" : "Elegir\u2026") + '</option>' +
+          opciones.map(function (o) {
+            return '<option' + (txt(o) === txt(valor) ? " selected" : "") + '>' + esc(o) + '</option>';
+          }).join("") + '</select>';
+      };
+
+      var prots = (f.prot || []).map(function (pr, j) {
+        var opp = opcionesTablero(cat, pr.familia);
+        var selP = function (campo, valor, opciones, deshab) {
+          return '<select class="in" data-tap="' + i + '|' + j + '|' + campo + '"' + (deshab ? " disabled" : "") + '>' +
+            '<option value="">' + (deshab ? "\u2014" : "Elegir\u2026") + '</option>' +
+            opciones.map(function (o) {
+              return '<option' + (txt(o) === txt(valor) ? " selected" : "") + '>' + esc(o) + '</option>';
+            }).join("") + '</select>';
+        };
+        return '<div class="g protfila" style="grid-template-columns:1fr 1.3fr 76px 62px">' +
+          '<div>' + selP("familia", pr.familia, opp.protecciones, false) + '</div>' +
+          '<div>' + selP("subitem", pr.subitem, opp.subitems, !pr.familia) + '</div>' +
+          '<div><input class="in m" type="number" min="0" step="1" data-tap="' + i + '|' + j + '|cantidad" value="' +
+            (pr.cantidad === undefined ? 1 : pr.cantidad) + '"></div>' +
+          '<div><button class="btnx" data-quitaprot="' + i + '|' + j + '">Quitar</button></div>' +
+        '</div>';
+      }).join("");
+
+      return '<div class="bloque">' +
+        '<div class="bloque-hd"><span class="bloque-n">Tablero ' + (i + 1) + '</span>' +
+          '<button class="btnx" data-quitata="' + i + '">Quitar</button></div>' +
+        '<div class="g" style="grid-template-columns:1fr 1fr">' +
+          '<div><label class="lbl">Tipo</label>' + selT("familia", f.familia, op.tableros, false) + '</div>' +
+          '<div><label class="lbl">Configuraci\u00f3n</label>' + selT("subitem", f.subitem, op.subitems, !f.familia) + '</div>' +
+        '</div>' +
+        '<div class="protbloque">' +
+          '<label class="lbl">Protecciones</label>' +
+          (prots || '<p style="margin:0 0 8px;font-size:12px;color:var(--ink3)">Sin protecciones.</p>') +
+          '<button class="btn btnmini" data-masprot="' + i + '">+ Agregar protecci\u00f3n</button>' +
+        '</div>' +
+      '</div>';
+    }).join("");
+
+    formTA = '<div class="card"><div class="chd"><span class="ct">Tableros</span>' +
+      '<span class="cn">' + filasTA.length + (filasTA.length === 1 ? " l\u00ednea" : " l\u00edneas") + '</span></div>' +
+      '<div class="cbd">' + (bloquesTA || '<p style="margin:0 0 12px;font-size:13px;color:var(--ink2)">Sin l\u00edneas todav\u00eda.</p>') +
+      '<button class="btn" id="masTA">+ Agregar tablero</button></div></div>';
+  }
+
   /* --- formulario de módulos --- */
   var filasMO = datos.mo || [];
   var formMO = "";
@@ -2053,7 +2207,7 @@ function panelApu(p, cat, act) {
   }
 
   /* --- apartados aún no portados --- */
-  var listos = ["TU", "EQ", "mo"];
+  var listos = ["TU", "EQ", "TA", "mo"];
   var pendientes = act.cod.filter(function (c) { return listos.indexOf(c) < 0; });
   var avisoPend = pendientes.length
     ? '<div class="note"><div class="notet">Apartados en camino</div><div class="noteb">' +
@@ -2121,7 +2275,7 @@ function panelApu(p, cat, act) {
         (val.directo > 0 ? '<div class="ok" style="margin-top:13px">La mano de obra pesa ' +
           val.pesoMo + '% del costo directo.</div>' : "") +
       '</div>';
-  } else if (!filasTU.length && !filasEQ.length && !filasMO.length) {
+  } else if (!filasTU.length && !filasEQ.length && !filasTA.length && !filasMO.length) {
     cuerpoComp = '<div class="empty">Agrega una línea arriba y la composición aparece aquí.</div>';
   } else {
     var faltan = [];
@@ -2158,7 +2312,7 @@ function panelApu(p, cat, act) {
         '<div class="m" style="font-size:11px;color:var(--ink3);margin-top:7px">' +
         act.items.map(function (x) { return fmt(x.cant) + " " + esc(x.und); }).join("  ·  ") + '</div>' +
       '</div></div>' +
-    avisoPend + formTU + formEQ + formMO + reglas + avisos + tabla +
+    avisoPend + formTU + formEQ + formTA + formMO + reglas + avisos + tabla +
     '<div class="card"><div class="chd"><span class="ct">Consideraciones del análisis</span></div>' +
       '<div class="cbd"><textarea class="in" id="notaapu" ' +
       'placeholder="Por qué se armó así, qué se asumió, qué quedó por fuera.">' + esc(nota) + '</textarea></div></div>';
@@ -2300,6 +2454,69 @@ function enlazarPanel(p) {
     };
   });
 
+  /* --- tableros --- */
+  var masT = document.getElementById("masTA");
+  if (masT) masT.onclick = function () {
+    var d = datosDe(p, act.apu);
+    if (!d.TA) d.TA = [];
+    d.TA.push({ familia: "", subitem: "", prot: [] });
+    Store.guardar(p); refrescarPanel(p);
+  };
+  Array.prototype.forEach.call(document.querySelectorAll("[data-quitata]"), function (b) {
+    b.onclick = function () {
+      var d = datosDe(p, act.apu);
+      d.TA.splice(Number(b.dataset.quitata), 1);
+      Store.guardar(p); refrescarPanel(p);
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-masprot]"), function (b) {
+    b.onclick = function () {
+      var d = datosDe(p, act.apu);
+      var f = d.TA[Number(b.dataset.masprot)];
+      if (!f) return;
+      if (!f.prot) f.prot = [];
+      f.prot.push({ familia: "", subitem: "", cantidad: 1 });
+      Store.guardar(p); refrescarPanel(p);
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-quitaprot]"), function (b) {
+    b.onclick = function () {
+      var q = b.dataset.quitaprot.split("|");
+      var d = datosDe(p, act.apu);
+      var f = d.TA[Number(q[0])];
+      if (!f || !f.prot) return;
+      f.prot.splice(Number(q[1]), 1);
+      Store.guardar(p); refrescarPanel(p);
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-ta]"), function (el) {
+    var q = el.dataset.ta.split("|"), campo = q[1];
+    el.onchange = function () {
+      var d = datosDe(p, act.apu);
+      var f = d.TA && d.TA[Number(q[0])];
+      if (!f) return;
+      f[campo] = el.value;
+      if (campo === "familia") f.subitem = "";
+      Store.guardar(p); refrescarPanel(p);
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-tap]"), function (el) {
+    var q = el.dataset.tap.split("|"), campo = q[2];
+    el.onchange = function () {
+      var d = datosDe(p, act.apu);
+      var f = d.TA && d.TA[Number(q[0])];
+      if (!f || !f.prot) return;
+      var pr = f.prot[Number(q[1])];
+      if (!pr) return;
+      pr[campo] = campo === "cantidad" ? (Number(el.value) || 0) : el.value;
+      if (campo === "familia") pr.subitem = "";
+      Store.guardar(p); refrescarPanel(p);
+    };
+    if (el.tagName === "INPUT") el.onkeydown = function (e) {
+      if (e.key === "Enter") { e.preventDefault(); el.blur(); }
+    };
+  });
+
   /* --- módulos --- */
   var masM = document.getElementById("masMO");
   if (masM) masM.onclick = function () {
@@ -2366,6 +2583,147 @@ function enlazarApartados(p) {
   if (ic) { ic.onclick = function () { ir({ pantalla: "catalogo" }); }; return; }
   enlazarLista(p);
   enlazarPanel(p);
+}
+
+/* ---- Paso 5: insumos usados en el proyecto ---- */
+
+/* Recorre todos los análisis y junta los insumos con su cantidad total */
+function insumosDe(p, cat) {
+  var uso = {}, orden = [];
+  analisisDe(p).forEach(function (a) {
+    var datos = (p.datosApu && p.datosApu[a.apu]) || {};
+    var comp = componerAnalisis(cat, datos, p, a.apu);
+    var cantAnexo = a.items.reduce(function (t, x) { return t + (Number(x.cant) || 0); }, 0);
+    comp.lineas.forEach(function (l) {
+      if (!uso[l.cod]) {
+        uso[l.cod] = { cod: l.cod, desc: l.desc, und: l.und, cantidad: 0, apus: [] };
+        orden.push(l.cod);
+      }
+      uso[l.cod].cantidad += l.cant * cantAnexo;
+      if (uso[l.cod].apus.indexOf(a.apu) < 0) uso[l.cod].apus.push(a.apu);
+    });
+  });
+  var idx = Catalogo.indice(cat);
+  return orden.map(function (c) {
+    var u = uso[c];
+    var it = idx[c] !== undefined ? cat.items[idx[c]] : null;
+    u.desc = u.desc || (it ? it.desc : "");
+    u.und = u.und || (it ? it.und : "");
+    u.precio = it ? Number(it.precio) || 0 : 0;
+    u.imp = it ? !!it.imp : false;
+    u.enCat = !!it;
+    u.mo = esManoObra(c);
+    return u;
+  });
+}
+
+function vInsumos(p) {
+  var cat = Catalogo.leer();
+  if (!cat || !cat.comp)
+    return '<div class="card"><div class="empty">Falta cargar el catálogo de insumos.</div></div>';
+
+  var lista = insumosDe(p, cat);
+  if (!lista.length)
+    return '<div class="card"><div class="empty"><div class="dropt">Todavía no hay insumos</div>' +
+      'Arma algún análisis en el paso 4 y aquí aparecerán los insumos que usa este proyecto.</div></div>';
+
+  var sin = lista.filter(function (i) { return i.precio <= 0; }).length;
+  var q = (vista.buscaIns || "").toLowerCase();
+  var ver = lista;
+  if (q) ver = ver.filter(function (i) {
+    return i.cod.toLowerCase().indexOf(q) >= 0 || (i.desc || "").toLowerCase().indexOf(q) >= 0;
+  });
+  if (vista.soloSinIns) ver = ver.filter(function (i) { return i.precio <= 0; });
+
+  var mg = p.margenes || {};
+  var totalMat = 0, totalMo = 0;
+  lista.forEach(function (i) {
+    var v = i.cantidad * precioAjustado({ precio: i.precio, imp: i.imp }, mg);
+    if (i.mo) totalMo += v; else totalMat += v;
+  });
+
+  var filas = ver.map(function (i) {
+    var venta = precioAjustado({ precio: i.precio, imp: i.imp }, mg);
+    return '<tr' + (i.precio <= 0 ? ' class="filasinp"' : "") + (i.mo ? ' data-mo="1"' : "") + '>' +
+      '<td class="m" style="font-size:12px">' + esc(i.cod) + '</td>' +
+      '<td>' + esc(i.desc) + '</td>' +
+      '<td style="color:var(--ink3);font-size:12px">' + esc(i.und) + '</td>' +
+      '<td class="num">' + dec(i.cantidad) + '</td>' +
+      '<td class="num"><input class="in m inprecio' + (i.precio > 0 ? " ok" : "") + '" type="number" min="0" step="1" ' +
+        'data-iprecio="' + esc(i.cod) + '" value="' + (i.precio > 0 ? i.precio : "") + '" placeholder="sin precio"></td>' +
+      '<td style="text-align:center">' + (i.mo ? "" :
+        '<input type="checkbox" data-iimp="' + esc(i.cod) + '"' + (i.imp ? " checked" : "") + '>') + '</td>' +
+      '<td class="num">' + (i.precio > 0 ? cop(venta * i.cantidad) : "—") + '</td>' +
+      '<td class="m" style="font-size:11px;color:var(--ink3)">' + i.apus.slice(0, 4).join(", ") +
+        (i.apus.length > 4 ? " +" + (i.apus.length - 4) : "") + '</td>' +
+    '</tr>';
+  }).join("");
+
+  return '<div class="card"><div class="cbd">' +
+      '<div class="kpi" style="margin-bottom:13px">' +
+        '<div class="kc"><div class="kk">Insumos</div><div class="kv">' + lista.length + '</div></div>' +
+        '<div class="kc"><div class="kk">Sin precio</div><div class="kv">' + sin + '</div></div>' +
+        '<div class="kc"><div class="kk">Materiales</div><div class="kv" style="font-size:15px">' + cop(totalMat) + '</div></div>' +
+        '<div class="kc"><div class="kk">Mano de obra</div><div class="kv" style="font-size:15px">' + cop(totalMo) + '</div></div>' +
+      '</div>' +
+      (sin ? '<div class="err">Faltan ' + sin + ' precios para poder cerrar la oferta.</div>'
+           : '<div class="ok">Todos los insumos de este proyecto tienen precio.</div>') +
+    '</div></div>' +
+
+    '<div class="card">' +
+      '<div class="chd"><span class="ct">Insumos de este proyecto</span>' +
+      '<span class="cn">' + ver.length + ' de ' + lista.length + '</span></div>' +
+      '<div class="cbd" style="padding-bottom:12px">' +
+        '<input class="in" id="buscains" placeholder="Buscar por código o descripción" value="' +
+          esc(vista.buscaIns || "") + '">' +
+        '<label class="lbl" style="margin-top:10px"><input type="checkbox" id="solosinins"' +
+          (vista.soloSinIns ? " checked" : "") + '> Ver solo los que no tienen precio</label>' +
+      '</div>' +
+      '<div class="scroll"><table class="tbl"><thead><tr>' +
+        '<th style="width:96px">Código</th><th>Descripción</th><th style="width:52px">Und</th>' +
+        '<th class="num" style="width:88px">Cantidad</th>' +
+        '<th class="num" style="width:112px">Precio costo</th>' +
+        '<th style="width:44px;text-align:center" title="Importado">Imp.</th>' +
+        '<th class="num" style="width:108px">Vale</th>' +
+        '<th style="width:92px">Análisis</th>' +
+      '</tr></thead><tbody>' + filas + '</tbody></table></div>' +
+    '</div>' +
+
+    '<div class="note"><div class="notet">Qué muestra la cantidad</div>' +
+    '<div class="noteb">Es cuánto se necesita de ese insumo en todo el proyecto: la incidencia de cada ' +
+    'análisis multiplicada por las cantidades del anexo del cliente. Sirve tanto para pedir precios ' +
+    'como para saber qué comprar.</div></div>';
+}
+
+function enlazarInsumos(p) {
+  var b = document.getElementById("buscains");
+  if (b) b.oninput = function () {
+    vista.buscaIns = this.value;
+    var pos = this.selectionStart, y = window.scrollY;
+    render(); window.scrollTo(0, y);
+    var n = document.getElementById("buscains");
+    if (n) { n.focus(); n.setSelectionRange(pos, pos); }
+  };
+  var s = document.getElementById("solosinins");
+  if (s) s.onchange = function () { ir({ soloSinIns: this.checked }); };
+
+  var editar = function (attr, aplica) {
+    Array.prototype.forEach.call(document.querySelectorAll("[" + attr + "]"), function (el) {
+      el.onchange = function () {
+        var c = Catalogo.leer();
+        var ix = Catalogo.indice(c);
+        var i = ix[el.getAttribute(attr)];
+        if (i === undefined) return;
+        aplica(c.items[i], el);
+        c.items[i].act = new Date().toISOString();
+        Catalogo.guardar(c);
+        var y = window.scrollY; render(); window.scrollTo(0, y);
+      };
+      el.onkeydown = function (e) { if (e.key === "Enter") { e.preventDefault(); el.blur(); } };
+    });
+  };
+  editar("data-iprecio", function (it, el) { it.precio = Number(el.value) || 0; });
+  editar("data-iimp", function (it, el) { it.imp = el.checked; });
 }
 
 /* ---- 7.8 Paso 5: entrega ---- */

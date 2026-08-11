@@ -164,6 +164,20 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;}
 .aporte{margin-top:13px;padding-top:12px;border-top:1px dashed var(--line);}
 .aporte .dlk{font-size:12px;}
 
+/* ---- marca ---- */
+.marca{display:flex;align-items:center;gap:15px;}
+.logo{display:block;flex-shrink:0;line-height:0;border-radius:6px;overflow:hidden;
+  border:1px solid var(--line);background:#fff;}
+.logo img{display:block;width:58px;height:58px;object-fit:contain;}
+.logo:focus-visible{outline:2px solid var(--lime);outline-offset:2px;}
+.enlace{color:var(--limedk);text-decoration:none;border-bottom:1px solid transparent;}
+.enlace:hover{border-bottom-color:var(--limedk);}
+
+/* ---- protecciones del tablero ---- */
+.protbloque{margin-top:12px;padding-top:11px;border-top:1px dashed var(--line);}
+.protfila{margin-bottom:7px;align-items:center;}
+.btnmini{padding:5px 11px;font-size:12px;}
+
 /* ---- fichas y botones ---- */
 .chip{display:inline-block;font-family:'IBM Plex Mono',monospace;font-size:11px;padding:2px 7px;border-radius:3px;
   background:#EAF2FA;color:#22506E;border:1px solid #CFE0EE;margin-right:4px;}
