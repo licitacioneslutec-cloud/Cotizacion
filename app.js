@@ -559,7 +559,10 @@ function componerEquipo(cat, fila, p, apu) {
       Store.guardar(p);
     }
     creado = { cod: fila.codItem, desc: txt(fila.nombreItem) };
-    lineas.push({ cant: 1, cod: fila.codItem, desc: txt(fila.nombreItem), und: "UND", nuevo: true });
+    lineas.push({
+      cant: 1, cod: fila.codItem, desc: txt(fila.nombreItem),
+      und: txt(fila.unidad) || "UND", propio: true
+    });
     quitarPrincipal = true;
   }
 
@@ -600,6 +603,27 @@ function componerModulo(cat, fila) {
   };
 }
 
+/* Los ítems que crea el usuario entran al catálogo para poder valorizarlos */
+function registrarPropio(cat, fila) {
+  var idx = Catalogo.indice(cat);
+  var cod = codClave(fila.codItem);
+  var it;
+  if (idx[cod] === undefined) {
+    it = { cod: cod, desc: "", und: "", precio: 0, precioAnt: 0, prov: "", codProv: "", act: "", propio: true };
+    cat.items.push(it);
+    _idxCat = null;
+  } else {
+    it = cat.items[idx[cod]];
+  }
+  var cambio = false;
+  var nd = txt(fila.nombreItem), nu = txt(fila.unidad) || "UND", np = Number(fila.precio) || 0;
+  if (it.desc !== nd) { it.desc = nd; cambio = true; }
+  if (it.und !== nu) { it.und = nu; cambio = true; }
+  if (Number(it.precio) !== np) { it.precio = np; cambio = true; }
+  if (!!it.imp !== !!fila.imp) { it.imp = !!fila.imp; cambio = true; }
+  if (cambio) Catalogo.guardar(cat);
+}
+
 /* Compone todas las filas de un análisis */
 function componerAnalisis(cat, datos, p, apu) {
   var lineas = [], avisos = [], reglas = [], creados = [];
@@ -613,6 +637,7 @@ function componerAnalisis(cat, datos, p, apu) {
   });
 
   ((datos && datos.EQ) || []).forEach(function (fila, i) {
+    if (fila.crearItem && fila.codItem && txt(fila.nombreItem)) registrarPropio(cat, fila);
     var r = componerEquipo(cat, fila, p, apu);
     if (r.aviso) { avisos.push("Equipo " + (i + 1) + ": " + r.aviso); return; }
     if (r.creado) creados.push(r.creado);
@@ -629,7 +654,7 @@ function componerAnalisis(cat, datos, p, apu) {
   var mapa = {}, orden = [];
   lineas.forEach(function (l) {
     if (mapa[l.cod]) { mapa[l.cod].cant += l.cant; return; }
-    mapa[l.cod] = { cant: l.cant, cod: l.cod, desc: l.desc, und: l.und, f075: l.f075, nuevo: l.nuevo };
+    mapa[l.cod] = { cant: l.cant, cod: l.cod, desc: l.desc, und: l.und, f075: l.f075, propio: l.propio };
     orden.push(l.cod);
   });
   return {
@@ -661,29 +686,62 @@ function valorizar(cat, lineas, margenes) {
   var conPrecio = lineas.map(function (l) {
     var it = idx[l.cod] !== undefined ? cat.items[idx[l.cod]] : null;
     var base = it ? Number(it.precio) || 0 : 0;
-    var precio = l.nuevo ? 0 : precioAjustado(it, mg);
+    var precio = precioAjustado(it, mg);
     var total = l.cant * precio;
-    if (precio <= 0 && !l.nuevo) sinPrecio++;
+    if (precio <= 0) sinPrecio++;
     if (esManoObra(l.cod)) mo += total; else mat += total;
     return {
       cant: l.cant, cod: l.cod, desc: l.desc || (it ? it.desc : ""),
       und: l.und || (it ? it.und : ""), base: base, precio: precio, total: total,
-      falta: precio <= 0 && !l.nuevo, mo: esManoObra(l.cod), f075: l.f075,
-      nuevo: l.nuevo, imp: it ? !!it.imp : false, enCatalogo: !!it
+      falta: precio <= 0, mo: esManoObra(l.cod), f075: l.f075,
+      propio: l.propio, imp: it ? !!it.imp : false, enCatalogo: !!it
     };
   });
 
   var directo = mat + mo;
-  var a = directo * ((mg.admin || 0) / 100);
-  var i = directo * ((mg.imprev || 0) / 100);
-  var u = directo * ((mg.util || 0) / 100);
-  var v = u * ((mg.iva || 0) / 100);
-
   return {
     lineas: conPrecio, mat: mat, mo: mo, directo: directo,
-    admin: a, imprev: i, util: u, iva: v, venta: directo + a + i + u + v,
-    sinPrecio: sinPrecio,
+    unitario: directo, sinPrecio: sinPrecio,
     pesoMo: directo > 0 ? Math.round((mo / directo) * 100) : 0
+  };
+}
+
+/* ------------------------------------------------------------------
+   Totales del proyecto
+   El unitario de cada análisis se multiplica por la cantidad de cada
+   ítem del anexo que lo usa. El AIU y el IVA se montan una sola vez
+   sobre el subtotal, igual que en la carta de oferta.
+   ------------------------------------------------------------------ */
+function totalesProyecto(p, cat) {
+  var mg = p.margenes || {};
+  var subtotal = 0, conValor = 0, sinValor = 0, faltantes = 0, analisis = 0;
+  var porApu = {};
+
+  if (cat && cat.comp) {
+    analisisDe(p).forEach(function (a) {
+      analisis++;
+      var datos = (p.datosApu && p.datosApu[a.apu]) || {};
+      var comp = componerAnalisis(cat, datos, p, a.apu);
+      var val = valorizar(cat, comp.lineas, mg);
+      porApu[a.apu] = { unitario: val.unitario, sinPrecio: val.sinPrecio, lineas: comp.lineas.length };
+      faltantes += val.sinPrecio;
+      a.items.forEach(function (it) {
+        if (val.unitario > 0) { subtotal += val.unitario * (Number(it.cant) || 0); conValor++; }
+        else sinValor++;
+      });
+    });
+  }
+
+  var admin = subtotal * ((mg.admin || 0) / 100);
+  var imprev = subtotal * ((mg.imprev || 0) / 100);
+  var util = subtotal * ((mg.util || 0) / 100);
+  var iva = util * ((mg.iva || 0) / 100);
+
+  return {
+    subtotal: subtotal, admin: admin, imprev: imprev, util: util, iva: iva,
+    total: subtotal + admin + imprev + util + iva,
+    conValor: conValor, sinValor: sinValor, faltantes: faltantes,
+    analisis: analisis, porApu: porApu
   };
 }
 
@@ -874,13 +932,15 @@ function renderCatalogo() {
     var muestra = lista.slice(0, 120);
 
     var filas = muestra.map(function (i) {
-      var tienePrecio = Number(i.precio) > 0;
-      return '<tr>' +
+      var tiene = Number(i.precio) > 0;
+      return '<tr' + (tiene ? "" : ' class="filasinp"') + '>' +
         '<td class="m" style="font-size:12px">' + esc(i.cod) + '</td>' +
         '<td>' + esc(i.desc) + '</td>' +
-        '<td style="color:var(--ink3);font-size:12px">' + esc(i.und) + '</td>' +
-        '<td class="num">' + (tienePrecio ? cop(i.precio) :
-          '<span style="color:var(--err)">sin precio</span>') + '</td>' +
+        '<td><input class="in inund" data-cund="' + esc(i.cod) + '" value="' + esc(i.und || "") + '"></td>' +
+        '<td class="num"><input class="in m inprecio' + (tiene ? " ok" : "") + '" type="number" min="0" step="1" ' +
+          'data-cprecio="' + esc(i.cod) + '" value="' + (tiene ? i.precio : "") + '" placeholder="sin precio"></td>' +
+        '<td style="text-align:center"><input type="checkbox" data-cimp="' + esc(i.cod) + '"' +
+          (i.imp ? " checked" : "") + ' title="Importado: lleva el factor de dólar"></td>' +
         '<td style="font-size:12px;color:var(--ink3)">' + esc(i.prov || "—") + '</td>' +
         '<td style="font-size:12px;color:var(--ink3)">' + (i.act ? fecha(i.act.slice(0, 10)) : "—") + '</td>' +
       '</tr>';
@@ -919,9 +979,10 @@ function renderCatalogo() {
             (vista.soloSin ? " checked" : "") + '> Ver solo los que no tienen precio</label>' +
         '</div>' +
         '<div class="scroll"><table class="tbl"><thead><tr>' +
-          '<th style="width:96px">Código</th><th>Descripción</th><th style="width:56px">Und</th>' +
-          '<th style="width:96px" class="num">Precio</th><th style="width:110px">Proveedor</th>' +
-          '<th style="width:90px">Actualizado</th>' +
+          '<th style="width:96px">Código</th><th>Descripción</th><th style="width:74px">Und</th>' +
+          '<th style="width:112px" class="num">Precio costo</th>' +
+          '<th style="width:44px;text-align:center" title="Importado">Imp.</th>' +
+          '<th style="width:104px">Proveedor</th><th style="width:88px">Actualizado</th>' +
         '</tr></thead><tbody>' + filas + '</tbody></table></div>' +
       '</div>';
   }
@@ -973,6 +1034,36 @@ function renderCatalogo() {
   };
   var s = document.getElementById("solosin");
   if (s) s.onchange = function () { ir({ soloSin: this.checked }); };
+
+  /* edición directa de precio, unidad e importado */
+  var editar = function (attr, aplica) {
+    Array.prototype.forEach.call(document.querySelectorAll("[" + attr + "]"), function (el) {
+      var accion = function () {
+        var c = Catalogo.leer();
+        var ix = Catalogo.indice(c);
+        var i = ix[el.getAttribute(attr)];
+        if (i === undefined) return;
+        aplica(c.items[i], el);
+        c.items[i].act = new Date().toISOString();
+        Catalogo.guardar(c);
+        var cb = Catalogo.cobertura(c);
+        var kv = document.querySelectorAll(".kv");
+        if (kv.length >= 4) { kv[1].textContent = cb.con; kv[2].textContent = cb.sin; kv[3].textContent = cb.pct + "%"; }
+        var bf = document.querySelector(".barf");
+        if (bf) bf.style.width = cb.pct + "%";
+        if (el.type === "number") {
+          var tiene = Number(el.value) > 0;
+          el.classList.toggle("ok", tiene);
+          if (el.closest) { var tr = el.closest("tr"); if (tr) tr.classList.toggle("filasinp", !tiene); }
+        }
+      };
+      el.onchange = accion;
+      el.onkeydown = function (e) { if (e.key === "Enter") { e.preventDefault(); el.blur(); } };
+    });
+  };
+  editar("data-cprecio", function (it, el) { it.precio = Number(el.value) || 0; });
+  editar("data-cund", function (it, el) { it.und = el.value; });
+  editar("data-cimp", function (it, el) { it.imp = el.checked; });
 
   var act = document.getElementById("actualizar");
   if (act) act.onclick = function () { ir({ pantalla: "precios", precios: null }); };
@@ -1450,24 +1541,38 @@ function renderProyecto() {
 /* ---- 7.4 Paso 1: ficha ---- */
 
 function vFicha(p, r) {
-  var t = totales(p);
+  var cat = Catalogo.leer();
+  var t = totalesProyecto(p, cat);
   var mg = p.margenes;
   if (mg.rent === undefined) mg.rent = 10;
   if (mg.dolar === undefined) mg.dolar = 19;
+
   var campos = [["rent", "Rentabilidad"], ["dolar", "Factor dólar"],
                 ["admin", "Administración"], ["imprev", "Imprevistos"],
                 ["util", "Utilidad"], ["iva", "IVA s/ utilidad"]]
     .map(function (c) {
       return '<div><label class="lbl" for="mg-' + c[0] + '">' + c[1] + ' %</label>' +
-        '<input class="in m" type="number" min="0" max="100" step="0.5" id="mg-' + c[0] + '" data-mg="' + c[0] + '" value="' + mg[c[0]] + '"></div>';
+        '<input class="in m" type="number" min="0" max="100" step="0.5" id="mg-' + c[0] +
+        '" data-mg="' + c[0] + '" value="' + mg[c[0]] + '"></div>';
     }).join("");
+
+  var estado = "";
+  if (!cat) estado = '<div class="err">Falta cargar el catálogo de insumos. Sin él no se puede valorizar nada.</div>';
+  else if (t.sinValor) estado = '<div class="note" style="margin:0"><div class="notet">Lo que falta</div>' +
+    '<div class="noteb">' + t.sinValor + ' de ' + (t.conValor + t.sinValor) +
+    ' ítems todavía no tienen valor, porque su análisis está sin armar o sin precios. ' +
+    'El total de abajo solo cuenta los ' + t.conValor + ' que sí lo tienen.</div></div>';
+  else if (t.faltantes) estado = '<div class="note" style="margin:0"><div class="notet">Precios pendientes</div>' +
+    '<div class="noteb">Hay ' + t.faltantes + ' insumos sin precio repartidos entre los análisis. ' +
+    'El total va incompleto hasta que se llenen.</div></div>';
+  else if (t.subtotal > 0) estado = '<div class="ok">Todos los ítems tienen valor y todos los insumos tienen precio.</div>';
 
   return '<div class="card"><div class="cbd">' +
       '<div class="kpi" style="margin-bottom:13px">' +
         '<div class="kc"><div class="kk">Avance</div><div class="kv">' + r.avance + '%</div></div>' +
         '<div class="kc"><div class="kk">Ítems</div><div class="kv">' + r.items + '</div></div>' +
         '<div class="kc"><div class="kk">Análisis</div><div class="kv">' + r.analisis + '</div></div>' +
-        '<div class="kc"><div class="kk">Sin asignar</div><div class="kv">' + (r.items - r.asignados) + '</div></div>' +
+        '<div class="kc"><div class="kk">Con valor</div><div class="kv">' + t.conValor + '</div></div>' +
       '</div><div class="bar"><div class="barf" style="width:' + r.avance + '%"></div></div>' +
     '</div></div>' +
 
@@ -1493,22 +1598,21 @@ function vFicha(p, r) {
       '<textarea class="in" id="f-cons" placeholder="Condiciones acordadas, exclusiones, criterios técnicos.">' +
       esc(p.consideraciones || "") + '</textarea></div></div>' +
 
-    '<div class="card"><div class="chd"><span class="ct">Márgenes del proyecto</span>' +
-      '<span class="cn">Valor por defecto; cada insumo puede llevar el suyo</span></div><div class="cbd">' +
-      '<div class="field"><label class="lbl" for="f-cd">Costo directo del proyecto</label>' +
-        '<input class="in m" type="number" min="0" step="1000" id="f-cd" value="' + (p.costoDirecto || 0) + '"></div>' +
-      '<div class="g" style="grid-template-columns:repeat(auto-fit,minmax(108px,1fr));margin-bottom:17px">' + campos + '</div>' +
+    '<div class="card"><div class="chd"><span class="ct">Valor de la oferta</span>' +
+      '<span class="cn">Se recalcula con cada análisis</span></div><div class="cbd">' +
+      (estado ? estado + '<div style="height:15px"></div>' : "") +
+      '<div class="g" style="grid-template-columns:repeat(auto-fit,minmax(104px,1fr));margin-bottom:17px">' + campos + '</div>' +
       '<div class="dl">' +
-        '<div class="dlr"><span class="dlk">Costo directo</span><span class="dlv m">' + cop(t.d) + '</span></div>' +
-        '<div class="dlr"><span class="dlk">Administración</span><span class="dlv m">' + cop(t.a) + '</span></div>' +
-        '<div class="dlr"><span class="dlk">Imprevistos</span><span class="dlv m">' + cop(t.i) + '</span></div>' +
-        '<div class="dlr"><span class="dlk">Utilidad</span><span class="dlv m">' + cop(t.u) + '</span></div>' +
-        '<div class="dlr"><span class="dlk">IVA sobre utilidad</span><span class="dlv m">' + cop(t.v) + '</span></div>' +
+        '<div class="dlr"><span class="dlk">Subtotal · costo directo</span><span class="dlv m">' + cop(t.subtotal) + '</span></div>' +
+        '<div class="dlr"><span class="dlk">Administración</span><span class="dlv m">' + cop(t.admin) + '</span></div>' +
+        '<div class="dlr"><span class="dlk">Imprevistos</span><span class="dlv m">' + cop(t.imprev) + '</span></div>' +
+        '<div class="dlr"><span class="dlk">Utilidad</span><span class="dlv m">' + cop(t.util) + '</span></div>' +
+        '<div class="dlr"><span class="dlk">IVA sobre utilidad</span><span class="dlv m">' + cop(t.iva) + '</span></div>' +
         '<div class="dlr dltot"><span class="dlk">Valor total</span><span class="dlv m">' + cop(t.total) + '</span></div>' +
       '</div>' +
-      '<div class="ok" style="margin-top:13px">La rentabilidad y el factor dólar se montan sobre el precio de ' +
-      'cada insumo: costo dividido entre uno menos el factor. El dólar solo aplica a los insumos marcados ' +
-      'como importados. Administración, imprevistos, utilidad e IVA van sobre el costo directo del análisis.</div>' +
+      '<div class="ok" style="margin-top:13px">La rentabilidad y el factor dólar se montan sobre el precio de cada ' +
+      'insumo: costo dividido entre uno menos el factor. El dólar solo aplica a los marcados como importados. ' +
+      'Administración, imprevistos, utilidad e IVA van una sola vez sobre el subtotal.</div>' +
     '</div></div>';
 }
 
@@ -1517,7 +1621,6 @@ function enlazarFicha(p) {
   document.getElementById("f-rec").onchange = function () { p.recibo = this.value; guardar(); };
   document.getElementById("f-ent").onchange = function () { p.entrega = this.value; guardar(); render(); };
   document.getElementById("f-cons").onblur = function () { p.consideraciones = this.value; guardar(); };
-  document.getElementById("f-cd").oninput = function () { p.costoDirecto = Number(this.value) || 0; guardar(); render(); };
   Array.prototype.forEach.call(document.querySelectorAll("[data-mg]"), function (el) {
     el.oninput = function () { p.margenes[el.dataset.mg] = Number(el.value) || 0; guardar(); render(); };
   });
@@ -1895,11 +1998,24 @@ function panelApu(p, cat, act) {
         '</div>' +
         '<label class="lbl" style="margin-top:10px"><input type="checkbox" data-eqchk="' + i + '"' +
           (f.crearItem ? " checked" : "") + '> Crear \u00edtem propio</label>' +
-        (f.crearItem ? '<div class="g" style="grid-template-columns:1fr 118px;margin-top:6px">' +
-          '<div><input class="in" data-eq="' + i + '|nombreItem" placeholder="Nombre del \u00edtem" value="' +
-            esc(f.nombreItem || "") + '"></div>' +
-          '<div class="m codnuevo">' + (f.codItem ? esc(f.codItem) : "se asigna solo") + '</div>' +
-        '</div>' : "") +
+        (f.crearItem ? '<div class="itemnuevo">' +
+          '<div class="g" style="grid-template-columns:1fr 116px">' +
+            '<div><label class="lbl">Nombre del \u00edtem</label>' +
+              '<input class="in" data-eq="' + i + '|nombreItem" placeholder="C\u00f3mo se llama" value="' +
+              esc(f.nombreItem || "") + '"></div>' +
+            '<div><label class="lbl">C\u00f3digo</label>' +
+              '<div class="m codnuevo">' + (f.codItem ? esc(f.codItem) : "se asigna solo") + '</div></div>' +
+          '</div>' +
+          '<div class="g" style="grid-template-columns:116px 1fr 44px;margin-top:8px">' +
+            '<div><label class="lbl">Unidad</label>' +
+              '<input class="in" data-eq="' + i + '|unidad" placeholder="UND" value="' + esc(f.unidad || "") + '"></div>' +
+            '<div><label class="lbl">Precio costo</label>' +
+              '<input class="in m" type="number" min="0" step="1" data-eq="' + i + '|precio" ' +
+              'placeholder="sin precio" value="' + (f.precio || "") + '"></div>' +
+            '<div><label class="lbl">Imp.</label>' +
+              '<input type="checkbox" data-eqimp="' + i + '"' + (f.imp ? " checked" : "") +
+              ' title="Importado" style="margin-top:8px"></div>' +
+          '</div></div>' : "") +
       '</div>';
     }).join("");
 
@@ -1957,9 +2073,7 @@ function panelApu(p, cat, act) {
   if (comp.lineas.length) {
     var filas = val.lineas.map(function (l) {
       var celPrecio;
-      if (l.nuevo) {
-        celPrecio = '<span class="sinp">ítem propio</span>';
-      } else if (l.falta) {
+      if (l.falta) {
         celPrecio = '<input class="in m inprecio" type="number" min="0" step="1" ' +
           'data-poner="' + esc(l.cod) + '" placeholder="poner precio">';
       } else {
@@ -1976,7 +2090,7 @@ function panelApu(p, cat, act) {
           ? '<input type="checkbox" data-imp="' + esc(l.cod) + '"' + (l.imp ? " checked" : "") +
             ' title="Insumo importado: lleva el factor de dólar">' : "") + '</td>' +
         '<td class="num">' + celPrecio + '</td>' +
-        '<td class="num">' + (l.falta || l.nuevo ? "—" : cop(l.total)) + '</td>' +
+        '<td class="num">' + (l.falta ? "—" : cop(l.total)) + '</td>' +
       '</tr>';
     }).join("");
 
@@ -1993,11 +2107,16 @@ function panelApu(p, cat, act) {
         '<div class="dl">' +
           '<div class="dlr"><span class="dlk">Subtotal materiales</span><span class="dlv m">' + cop(val.mat) + '</span></div>' +
           '<div class="dlr"><span class="dlk">Subtotal mano de obra</span><span class="dlv m">' + cop(val.mo) + '</span></div>' +
-          '<div class="dlr"><span class="dlk">Costo directo</span><span class="dlv m">' + cop(val.directo) + '</span></div>' +
-          '<div class="dlr"><span class="dlk">AIU e IVA</span><span class="dlv m">' +
-            cop(val.admin + val.imprev + val.util + val.iva) + '</span></div>' +
-          '<div class="dlr dltot"><span class="dlk">Valor unitario de venta</span>' +
-            '<span class="dlv m">' + cop(val.venta) + '</span></div>' +
+          '<div class="dlr dltot"><span class="dlk">Valor unitario</span>' +
+            '<span class="dlv m">' + cop(val.unitario) + '</span></div>' +
+        '</div>' +
+        '<div class="aporte">' + act.items.map(function (x) {
+            return '<div class="dlr"><span class="dlk">' + esc(x.item) + ' · ' + fmt(x.cant) + ' ' + esc(x.und) +
+              '</span><span class="dlv m">' + cop(val.unitario * (Number(x.cant) || 0)) + '</span></div>';
+          }).join("") +
+          (act.items.length > 1 ? '<div class="dlr dltot"><span class="dlk">Aporte al proyecto</span>' +
+            '<span class="dlv m">' + cop(act.items.reduce(function (t, x) {
+              return t + val.unitario * (Number(x.cant) || 0); }, 0)) + '</span></div>' : "") +
         '</div>' +
         (val.directo > 0 ? '<div class="ok" style="margin-top:13px">La mano de obra pesa ' +
           val.pesoMo + '% del costo directo.</div>' : "") +
@@ -2144,6 +2263,15 @@ function enlazarPanel(p) {
       Store.guardar(p); refrescarPanel(p);
     };
   });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-eqimp]"), function (c) {
+    c.onchange = function () {
+      var d = datosDe(p, act.apu);
+      var f = d.EQ[Number(c.dataset.eqimp)];
+      if (!f) return;
+      f.imp = c.checked;
+      Store.guardar(p); refrescarPanel(p);
+    };
+  });
   Array.prototype.forEach.call(document.querySelectorAll("[data-eqchk]"), function (c) {
     c.onchange = function () {
       var d = datosDe(p, act.apu);
@@ -2243,42 +2371,61 @@ function enlazarApartados(p) {
 /* ---- 7.8 Paso 5: entrega ---- */
 
 function vEntrega(p) {
-  var t = totales(p);
-  return '<div class="card"><div class="chd"><span class="ct">Resumen de la oferta</span></div><div class="cbd">' +
+  var cat = Catalogo.leer();
+  var t = totalesProyecto(p, cat);
+  return '<div class="card"><div class="chd"><span class="ct">Resumen de la oferta</span>' +
+      '<span class="cn">' + t.conValor + ' de ' + (t.conValor + t.sinValor) + ' ítems con valor</span></div>' +
+      '<div class="cbd">' +
+      (t.sinValor || t.faltantes
+        ? '<div class="note" style="margin:0 0 15px"><div class="notet">Todavía incompleto</div>' +
+          '<div class="noteb">' + (t.sinValor ? t.sinValor + ' ítems sin valor. ' : "") +
+          (t.faltantes ? t.faltantes + ' insumos sin precio. ' : "") +
+          'El total de abajo no es definitivo.</div></div>' : "") +
       '<div class="dl">' +
-        '<div class="dlr"><span class="dlk">Costo directo</span><span class="dlv m">' + cop(t.d) + '</span></div>' +
-        '<div class="dlr"><span class="dlk">Administración</span><span class="dlv m">' + cop(t.a) + '</span></div>' +
-        '<div class="dlr"><span class="dlk">Imprevistos</span><span class="dlv m">' + cop(t.i) + '</span></div>' +
-        '<div class="dlr"><span class="dlk">Utilidad</span><span class="dlv m">' + cop(t.u) + '</span></div>' +
-        '<div class="dlr"><span class="dlk">IVA sobre utilidad</span><span class="dlv m">' + cop(t.v) + '</span></div>' +
+        '<div class="dlr"><span class="dlk">Subtotal · costo directo</span><span class="dlv m">' + cop(t.subtotal) + '</span></div>' +
+        '<div class="dlr"><span class="dlk">Administración</span><span class="dlv m">' + cop(t.admin) + '</span></div>' +
+        '<div class="dlr"><span class="dlk">Imprevistos</span><span class="dlv m">' + cop(t.imprev) + '</span></div>' +
+        '<div class="dlr"><span class="dlk">Utilidad</span><span class="dlv m">' + cop(t.util) + '</span></div>' +
+        '<div class="dlr"><span class="dlk">IVA sobre utilidad</span><span class="dlv m">' + cop(t.iva) + '</span></div>' +
         '<div class="dlr dltot"><span class="dlk">Valor total</span><span class="dlv m">' + cop(t.total) + '</span></div>' +
       '</div>' +
       '<div class="btnrow" style="margin-top:17px">' +
-        '<button class="btn btnp" id="exp-armado">Descargar armado en Excel</button>' +
+        '<button class="btn btnp" id="exp-armado">Descargar cotización valorizada</button>' +
       '</div>' +
     '</div></div>' +
     '<div class="note"><div class="notet">Alcance de esta versión</div>' +
-    '<div class="noteb">El Excel que se descarga trae el anexo con su reparto de apartados y su número de ' +
-    'análisis, listo para alimentar el proceso actual. La cotización valorizada, la hoja de análisis y la ' +
-    'carta llegan cuando esté el motor de cálculo.</div></div>';
+    '<div class="noteb">El Excel trae el anexo del cliente con su reparto de apartados, su número de análisis ' +
+    'y el valor unitario de los que ya están armados. La hoja de análisis detallada y la carta llegan cuando ' +
+    'estén los seis apartados.</div></div>';
 }
 
 function enlazarEntrega(p) {
   document.getElementById("exp-armado").onclick = function () {
-    var datos = [["HOJA", "CODIGO", "APU", "ITEM", "DESCRIPCION", "UND", "CANTIDAD", "CONSIDERACIONES"]];
+    var cat = Catalogo.leer();
+    var t = totalesProyecto(p, cat);
+    var datos = [["HOJA", "CODIGO", "APU", "ITEM", "DESCRIPCION", "UND", "CANTIDAD",
+                  "VR UNITARIO", "VR TOTAL", "CONSIDERACIONES"]];
     (p.hojas || []).forEach(function (h) {
       if (!h.usar) return;
       h.filas.forEach(function (f) {
         if (f.tipo !== "it") return;
+        var u = (t.porApu[f.apu] && t.porApu[f.apu].unitario) || 0;
         datos.push([h.nombre, f.cod.join(" "), f.apu || "", f.item, f.desc, f.und, f.cant,
-          (p.notasApu || {})[f.apu] || ""]);
+          u || "", u ? u * (Number(f.cant) || 0) : "", (p.notasApu || {})[f.apu] || ""]);
       });
     });
+    datos.push([]);
+    datos.push(["", "", "", "", "SUBTOTAL", "", "", "", t.subtotal, ""]);
+    datos.push(["", "", "", "", "ADMINISTRACION", "", "", "", t.admin, ""]);
+    datos.push(["", "", "", "", "IMPREVISTOS", "", "", "", t.imprev, ""]);
+    datos.push(["", "", "", "", "UTILIDAD", "", "", "", t.util, ""]);
+    datos.push(["", "", "", "", "IVA SOBRE UTILIDAD", "", "", "", t.iva, ""]);
+    datos.push(["", "", "", "", "VALOR TOTAL", "", "", "", t.total, ""]);
     var ws = XLSX.utils.aoa_to_sheet(datos);
-    ws["!cols"] = [{ wch: 22 }, { wch: 10 }, { wch: 6 }, { wch: 10 }, { wch: 62 }, { wch: 6 }, { wch: 10 }, { wch: 40 }];
+    ws["!cols"] = [{ wch: 22 }, { wch: 10 }, { wch: 6 }, { wch: 10 }, { wch: 58 }, { wch: 6 }, { wch: 11 }, { wch: 14 }, { wch: 16 }, { wch: 38 }];
     var wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "ARMADO");
-    XLSX.writeFile(wb, p.nombre.replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "_") + "_armado.xlsx");
+    XLSX.utils.book_append_sheet(wb, ws, "COTIZACION");
+    XLSX.writeFile(wb, p.nombre.replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "_") + "_cotizacion.xlsx");
   };
 }
 
