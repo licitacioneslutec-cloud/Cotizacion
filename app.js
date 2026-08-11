@@ -494,9 +494,116 @@ function componerTuberia(cat, fila) {
   return { lineas: lineas, aplica075: aplica075, aviso: null };
 }
 
+/* Contadores correlativos por familia, para los ítems que se crean */
+var CONTADOR_INICIAL = {
+  TRAFO: 5560010, CELDA: 5660010, TABLERO: 5760010,
+  CAJA_MAMPOSTERIA: 5860010, CAJA_METALICA: 5870010, SUBESTACION: 5880010,
+  CAJA_PVC: 5890010, LUMINARIA: 5910010, APANTALLAMIENTO: 5920010,
+  SIS_INCENDIO: 6020010, SIS_RITEL: 6030010, SIS_SEG_CTRL: 6040010,
+  SIS_SEG_CCTV: 6050010, SIS_COMM: 6060010, SIS_AUTOM: 6070010,
+  SIS_CTRL_ILU: 6080010, BORNA: 653100034, DOCUMENTACION: 6090010, EQUI_URB: 6100010
+};
+
+/* Opciones del apartado de equipos, en cascada */
+function opcionesEquipo(cat, familia) {
+  var d = (cat && cat.comp && cat.comp.equipos) || [];
+  var fam = {}, sub = {};
+  d.forEach(function (r) {
+    var f = limpia(r["FAMILIA"]), s = limpia(r["SUBFAMILIA"]);
+    if (f) fam[f] = true;
+    if (familia && f !== limpia(familia)) return;
+    if (s) sub[s] = true;
+  });
+  return { familias: Object.keys(fam).sort(), subfamilias: Object.keys(sub).sort() };
+}
+
+/* Todas las subfamilias, para el apartado de módulos */
+function subfamiliasEquipo(cat) {
+  var d = (cat && cat.comp && cat.comp.equipos) || [];
+  var s = {};
+  d.forEach(function (r) { var v = limpia(r["SUBFAMILIA"]); if (v) s[v] = true; });
+  return Object.keys(s).sort();
+}
+
+/* Reserva el siguiente código correlativo de una familia */
+function siguienteCodigo(p, familia) {
+  if (!p.contadores) p.contadores = {};
+  var f = limpia(familia);
+  if (p.contadores[f] === undefined) {
+    p.contadores[f] = CONTADOR_INICIAL[f] !== undefined ? CONTADOR_INICIAL[f] : null;
+  }
+  if (p.contadores[f] === null) return "ITEM_" + f;
+  var cod = String(p.contadores[f]);
+  p.contadores[f] += 1;
+  return cod;
+}
+
+/* Compone una fila de equipos. Réplica de la sección 5.4 del proceso actual. */
+function componerEquipo(cat, fila, p, apu) {
+  var d = (cat && cat.comp && cat.comp.equipos) || [];
+  var fam = limpia(fila.familia), sub = limpia(fila.subfamilia);
+  if (!fam || !sub) return { lineas: [], aviso: null, incompleto: true };
+
+  var enc = d.filter(function (r) {
+    return limpia(r["FAMILIA"]) === fam && limpia(r["SUBFAMILIA"]) === sub;
+  });
+  if (!enc.length) return { lineas: [], aviso: "No hay coincidencia: " + fam + " / " + sub };
+
+  var lineas = [], creado = null;
+  var quitarPrincipal = false;
+
+  if (fila.crearItem && txt(fila.nombreItem)) {
+    /* El código se reserva una vez y queda guardado con la fila */
+    if (!fila.codItem) {
+      fila.codItem = siguienteCodigo(p, fam);
+      Store.guardar(p);
+    }
+    creado = { cod: fila.codItem, desc: txt(fila.nombreItem) };
+    lineas.push({ cant: 1, cod: fila.codItem, desc: txt(fila.nombreItem), und: "UND", nuevo: true });
+    quitarPrincipal = true;
+  }
+
+  var mo = Number(fila.manoObra) || 0;
+
+  enc.forEach(function (r) {
+    var marca = limpia(r["ITEMP"]);
+    if (quitarPrincipal && marca === "PRINCIPAL") return;
+    var inc = aNum(r["INCIDENCIA"]);
+    var cant = (marca === "MN" && mo > 0) ? mo : inc;
+    lineas.push({
+      cant: cant, cod: codClave(r["CODIGO"]), desc: txt(r["DESCRIPCION"]),
+      und: txt(r["UNIDAD"]), mn: marca === "MN"
+    });
+  });
+
+  return { lineas: lineas, creado: creado, aviso: null };
+}
+
+/* Compone una fila de módulos: busca en equipos solo por subfamilia */
+function componerModulo(cat, fila) {
+  var d = (cat && cat.comp && cat.comp.equipos) || [];
+  var item = limpia(fila.item);
+  if (!item) return { lineas: [], incompleto: true };
+
+  var enc = d.filter(function (r) { return limpia(r["SUBFAMILIA"]) === item; });
+  if (!enc.length) return { lineas: [], aviso: "No se encontró en equipos: " + item };
+
+  var cu = Number(fila.cantidad);
+  if (!cu) cu = 1;
+  return {
+    lineas: enc.map(function (r) {
+      return {
+        cant: aNum(r["INCIDENCIA"]) * cu, cod: codClave(r["CODIGO"]),
+        desc: txt(r["DESCRIPCION"]), und: txt(r["UNIDAD"])
+      };
+    }), aviso: null
+  };
+}
+
 /* Compone todas las filas de un análisis */
-function componerAnalisis(cat, datos) {
-  var lineas = [], avisos = [], reglas = [];
+function componerAnalisis(cat, datos, p, apu) {
+  var lineas = [], avisos = [], reglas = [], creados = [];
+
   ((datos && datos.TU) || []).forEach(function (fila, i) {
     var r = componerTuberia(cat, fila);
     if (r.aviso) { avisos.push("Tubería " + (i + 1) + ": " + r.aviso); return; }
@@ -505,37 +612,67 @@ function componerAnalisis(cat, datos) {
     lineas = lineas.concat(r.lineas);
   });
 
+  ((datos && datos.EQ) || []).forEach(function (fila, i) {
+    var r = componerEquipo(cat, fila, p, apu);
+    if (r.aviso) { avisos.push("Equipo " + (i + 1) + ": " + r.aviso); return; }
+    if (r.creado) creados.push(r.creado);
+    lineas = lineas.concat(r.lineas);
+  });
+
+  ((datos && datos.mo) || []).forEach(function (fila, i) {
+    var r = componerModulo(cat, fila);
+    if (r.aviso) { avisos.push("Módulo " + (i + 1) + ": " + r.aviso); return; }
+    lineas = lineas.concat(r.lineas);
+  });
+
   /* Se suman las líneas repetidas del mismo código */
   var mapa = {}, orden = [];
   lineas.forEach(function (l) {
     if (mapa[l.cod]) { mapa[l.cod].cant += l.cant; return; }
-    mapa[l.cod] = { cant: l.cant, cod: l.cod, desc: l.desc, und: l.und, f075: l.f075 };
+    mapa[l.cod] = { cant: l.cant, cod: l.cod, desc: l.desc, und: l.und, f075: l.f075, nuevo: l.nuevo };
     orden.push(l.cod);
   });
   return {
     lineas: orden.map(function (c) { return mapa[c]; }),
-    avisos: avisos, reglas: reglas
+    avisos: avisos, reglas: reglas, creados: creados
   };
+}
+
+/* Precio de venta de un insumo: al costo se le monta la rentabilidad y,
+   si es importado, el factor de dólar. Ambos sobre el precio de venta,
+   igual que en la hoja de márgenes: costo / (1 - factor). */
+function precioAjustado(it, mg) {
+  var base = it ? Number(it.precio) || 0 : 0;
+  if (base <= 0) return 0;
+  var rent = it.rent !== undefined && it.rent !== null ? Number(it.rent) : Number(mg.rent || 0);
+  var dol = it.imp ? (it.dol !== undefined && it.dol !== null ? Number(it.dol) : Number(mg.dolar || 0)) : 0;
+  var v = base;
+  if (rent > 0 && rent < 100) v = v / (1 - rent / 100);
+  if (dol > 0 && dol < 100) v = v / (1 - dol / 100);
+  return v;
 }
 
 /* Le pone precio a cada línea y calcula subtotales */
 function valorizar(cat, lineas, margenes) {
   var idx = Catalogo.indice(cat);
+  var mg = margenes || {};
   var mat = 0, mo = 0, sinPrecio = 0;
+
   var conPrecio = lineas.map(function (l) {
     var it = idx[l.cod] !== undefined ? cat.items[idx[l.cod]] : null;
-    var precio = it ? Number(it.precio) || 0 : 0;
+    var base = it ? Number(it.precio) || 0 : 0;
+    var precio = l.nuevo ? 0 : precioAjustado(it, mg);
     var total = l.cant * precio;
-    if (precio <= 0) sinPrecio++;
+    if (precio <= 0 && !l.nuevo) sinPrecio++;
     if (esManoObra(l.cod)) mo += total; else mat += total;
     return {
       cant: l.cant, cod: l.cod, desc: l.desc || (it ? it.desc : ""),
-      und: l.und || (it ? it.und : ""), precio: precio, total: total,
-      falta: precio <= 0, mo: esManoObra(l.cod), f075: l.f075
+      und: l.und || (it ? it.und : ""), base: base, precio: precio, total: total,
+      falta: precio <= 0 && !l.nuevo, mo: esManoObra(l.cod), f075: l.f075,
+      nuevo: l.nuevo, imp: it ? !!it.imp : false, enCatalogo: !!it
     };
   });
 
-  var mg = margenes || {};
   var directo = mat + mo;
   var a = directo * ((mg.admin || 0) / 100);
   var i = directo * ((mg.imprev || 0) / 100);
@@ -1236,7 +1373,7 @@ function renderNuevo() {
       id: id(), nombre: b.nombre.trim(), cliente: b.cliente, ciudad: b.ciudad,
       recibo: b.recibo, entrega: b.entrega, archivo: b.archivo, hojas: b.hojas,
       consideraciones: "", costoDirecto: 0,
-      margenes: { admin: 8, imprev: 2, util: 5, iva: 19 },
+      margenes: { rent: 10, dolar: 19, admin: 8, imprev: 2, util: 5, iva: 19 },
       creado: new Date().toISOString()
     };
     Store.guardar(p);
@@ -1315,7 +1452,11 @@ function renderProyecto() {
 function vFicha(p, r) {
   var t = totales(p);
   var mg = p.margenes;
-  var campos = [["admin", "Administración"], ["imprev", "Imprevistos"], ["util", "Utilidad"], ["iva", "IVA s/ utilidad"]]
+  if (mg.rent === undefined) mg.rent = 10;
+  if (mg.dolar === undefined) mg.dolar = 19;
+  var campos = [["rent", "Rentabilidad"], ["dolar", "Factor dólar"],
+                ["admin", "Administración"], ["imprev", "Imprevistos"],
+                ["util", "Utilidad"], ["iva", "IVA s/ utilidad"]]
     .map(function (c) {
       return '<div><label class="lbl" for="mg-' + c[0] + '">' + c[1] + ' %</label>' +
         '<input class="in m" type="number" min="0" max="100" step="0.5" id="mg-' + c[0] + '" data-mg="' + c[0] + '" value="' + mg[c[0]] + '"></div>';
@@ -1365,8 +1506,9 @@ function vFicha(p, r) {
         '<div class="dlr"><span class="dlk">IVA sobre utilidad</span><span class="dlv m">' + cop(t.v) + '</span></div>' +
         '<div class="dlr dltot"><span class="dlk">Valor total</span><span class="dlv m">' + cop(t.total) + '</span></div>' +
       '</div>' +
-      '<div class="ok" style="margin-top:13px">Mientras no exista el motor de composición, escribe el costo directo a mano. ' +
-      'El resto se recalcula solo.</div>' +
+      '<div class="ok" style="margin-top:13px">La rentabilidad y el factor dólar se montan sobre el precio de ' +
+      'cada insumo: costo dividido entre uno menos el factor. El dólar solo aplica a los insumos marcados ' +
+      'como importados. Administración, imprevistos, utilidad e IVA van sobre el costo directo del análisis.</div>' +
     '</div></div>';
 }
 
@@ -1728,8 +1870,75 @@ function panelApu(p, cat, act) {
       '<button class="btn" id="masTU">+ Agregar tubería</button></div></div>';
   }
 
+  /* --- formulario de equipos --- */
+  var filasEQ = datos.EQ || [];
+  var formEQ = "";
+  if (act.cod.indexOf("EQ") >= 0) {
+    var bloquesEQ = filasEQ.map(function (f, i) {
+      var op = opcionesEquipo(cat, f.familia);
+      var sel = function (campo, valor, opciones, deshab) {
+        return '<select class="in" data-eq="' + i + '|' + campo + '"' + (deshab ? " disabled" : "") + '>' +
+          '<option value="">' + (deshab ? "\u2014" : "Elegir\u2026") + '</option>' +
+          opciones.map(function (o) {
+            return '<option' + (txt(o) === txt(valor) ? " selected" : "") + '>' + esc(o) + '</option>';
+          }).join("") + '</select>';
+      };
+      return '<div class="bloque">' +
+        '<div class="bloque-hd"><span class="bloque-n">Equipo ' + (i + 1) + '</span>' +
+          '<button class="btnx" data-quitaeq="' + i + '">Quitar</button></div>' +
+        '<div class="g" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr))">' +
+          '<div><label class="lbl">Familia</label>' + sel("familia", f.familia, op.familias, false) + '</div>' +
+          '<div><label class="lbl">Subfamilia</label>' + sel("subfamilia", f.subfamilia, op.subfamilias, !f.familia) + '</div>' +
+          '<div><label class="lbl">Mano de obra</label>' +
+            '<input class="in m" type="number" min="0" step="0.01" data-eq="' + i + '|manoObra" ' +
+            'placeholder="la del cat\u00e1logo" value="' + (f.manoObra || "") + '"></div>' +
+        '</div>' +
+        '<label class="lbl" style="margin-top:10px"><input type="checkbox" data-eqchk="' + i + '"' +
+          (f.crearItem ? " checked" : "") + '> Crear \u00edtem propio</label>' +
+        (f.crearItem ? '<div class="g" style="grid-template-columns:1fr 118px;margin-top:6px">' +
+          '<div><input class="in" data-eq="' + i + '|nombreItem" placeholder="Nombre del \u00edtem" value="' +
+            esc(f.nombreItem || "") + '"></div>' +
+          '<div class="m codnuevo">' + (f.codItem ? esc(f.codItem) : "se asigna solo") + '</div>' +
+        '</div>' : "") +
+      '</div>';
+    }).join("");
+
+    formEQ = '<div class="card"><div class="chd"><span class="ct">Equipos</span>' +
+      '<span class="cn">' + filasEQ.length + (filasEQ.length === 1 ? " l\u00ednea" : " l\u00edneas") + '</span></div>' +
+      '<div class="cbd">' + (bloquesEQ || '<p style="margin:0 0 12px;font-size:13px;color:var(--ink2)">Sin l\u00edneas todav\u00eda.</p>') +
+      '<button class="btn" id="masEQ">+ Agregar equipo</button></div></div>';
+  }
+
+  /* --- formulario de módulos --- */
+  var filasMO = datos.mo || [];
+  var formMO = "";
+  if (act.cod.indexOf("mo") >= 0) {
+    var subs = subfamiliasEquipo(cat);
+    var bloquesMO = filasMO.map(function (f, i) {
+      return '<div class="bloque">' +
+        '<div class="bloque-hd"><span class="bloque-n">M\u00f3dulo ' + (i + 1) + '</span>' +
+          '<button class="btnx" data-quitamo="' + i + '">Quitar</button></div>' +
+        '<div class="g" style="grid-template-columns:1fr 130px">' +
+          '<div><label class="lbl">\u00cdtem</label>' +
+            '<select class="in" data-mo="' + i + '|item"><option value="">Elegir\u2026</option>' +
+            subs.map(function (o) {
+              return '<option' + (txt(o) === txt(f.item) ? " selected" : "") + '>' + esc(o) + '</option>';
+            }).join("") + '</select></div>' +
+          '<div><label class="lbl">Cantidad</label>' +
+            '<input class="in m" type="number" min="0" step="0.01" data-mo="' + i + '|cantidad" value="' +
+            (f.cantidad === undefined ? 1 : f.cantidad) + '"></div>' +
+        '</div></div>';
+    }).join("");
+
+    formMO = '<div class="card"><div class="chd"><span class="ct">M\u00f3dulos</span>' +
+      '<span class="cn">' + filasMO.length + (filasMO.length === 1 ? " l\u00ednea" : " l\u00edneas") + '</span></div>' +
+      '<div class="cbd">' + (bloquesMO || '<p style="margin:0 0 12px;font-size:13px;color:var(--ink2)">Sin l\u00edneas todav\u00eda.</p>') +
+      '<button class="btn" id="masMO">+ Agregar m\u00f3dulo</button></div></div>';
+  }
+
   /* --- apartados aún no portados --- */
-  var pendientes = act.cod.filter(function (c) { return c !== "TU"; });
+  var listos = ["TU", "EQ", "mo"];
+  var pendientes = act.cod.filter(function (c) { return listos.indexOf(c) < 0; });
   var avisoPend = pendientes.length
     ? '<div class="note"><div class="notet">Apartados en camino</div><div class="noteb">' +
       'Este análisis también usa ' + pendientes.map(function (c) {
@@ -1741,26 +1950,41 @@ function panelApu(p, cat, act) {
     : "";
 
   /* --- composición: siempre visible, con su estado --- */
-  var comp = componerAnalisis(cat, datos);
+  var comp = componerAnalisis(cat, datos, p, act.apu);
   var val = valorizar(cat, comp.lineas, p.margenes);
   var cuerpoComp;
 
   if (comp.lineas.length) {
     var filas = val.lineas.map(function (l) {
+      var celPrecio;
+      if (l.nuevo) {
+        celPrecio = '<span class="sinp">ítem propio</span>';
+      } else if (l.falta) {
+        celPrecio = '<input class="in m inprecio" type="number" min="0" step="1" ' +
+          'data-poner="' + esc(l.cod) + '" placeholder="poner precio">';
+      } else {
+        celPrecio = cop(l.precio) +
+          (l.base && Math.abs(l.precio - l.base) > 0.5
+            ? '<div class="base">costo ' + cop(l.base) + '</div>' : "");
+      }
       return '<tr' + (l.mo ? ' class="morow"' : "") + '>' +
         '<td class="num">' + dec(l.cant) + '</td>' +
         '<td class="m" style="font-size:12px">' + esc(l.cod) + (l.f075 ? ' <span class="f75">·75%</span>' : "") + '</td>' +
         '<td>' + esc(l.desc) + '</td>' +
         '<td style="color:var(--ink3);font-size:12px">' + esc(l.und) + '</td>' +
-        '<td class="num">' + (l.falta ? '<span class="sinp">sin precio</span>' : cop(l.precio)) + '</td>' +
-        '<td class="num">' + (l.falta ? "—" : cop(l.total)) + '</td>' +
+        '<td style="text-align:center">' + (l.enCatalogo && !l.mo
+          ? '<input type="checkbox" data-imp="' + esc(l.cod) + '"' + (l.imp ? " checked" : "") +
+            ' title="Insumo importado: lleva el factor de dólar">' : "") + '</td>' +
+        '<td class="num">' + celPrecio + '</td>' +
+        '<td class="num">' + (l.falta || l.nuevo ? "—" : cop(l.total)) + '</td>' +
       '</tr>';
     }).join("");
 
     cuerpoComp = '<div class="scroll"><table class="tbl"><thead><tr>' +
-        '<th class="num" style="width:80px">Cant.</th><th style="width:106px">Código</th>' +
-        '<th>Descripción</th><th style="width:56px">Und</th>' +
-        '<th class="num" style="width:92px">Vr. unit</th><th class="num" style="width:96px">Vr. total</th>' +
+        '<th class="num" style="width:78px">Cant.</th><th style="width:104px">Código</th>' +
+        '<th>Descripción</th><th style="width:52px">Und</th>' +
+        '<th style="width:44px;text-align:center" title="Importado">Imp.</th>' +
+        '<th class="num" style="width:104px">Vr. venta</th><th class="num" style="width:96px">Vr. total</th>' +
       '</tr></thead><tbody>' + filas + '</tbody></table></div>' +
       '<div class="cbd" style="border-top:1px solid var(--line2)">' +
         (val.sinPrecio ? '<div class="err" style="margin-bottom:13px">' + val.sinPrecio +
@@ -1778,11 +2002,8 @@ function panelApu(p, cat, act) {
         (val.directo > 0 ? '<div class="ok" style="margin-top:13px">La mano de obra pesa ' +
           val.pesoMo + '% del costo directo.</div>' : "") +
       '</div>';
-  } else if (!tieneTU) {
-    cuerpoComp = '<div class="empty">Este análisis no usa tuberías, y los demás apartados ' +
-      'todavía no tienen motor. Aquí aparecerá la composición cuando estén listos.</div>';
-  } else if (!filasTU.length) {
-    cuerpoComp = '<div class="empty">Agrega una tubería arriba y la composición aparece aquí.</div>';
+  } else if (!filasTU.length && !filasEQ.length && !filasMO.length) {
+    cuerpoComp = '<div class="empty">Agrega una línea arriba y la composición aparece aquí.</div>';
   } else {
     var faltan = [];
     filasTU.forEach(function (f, i) {
@@ -1818,7 +2039,7 @@ function panelApu(p, cat, act) {
         '<div class="m" style="font-size:11px;color:var(--ink3);margin-top:7px">' +
         act.items.map(function (x) { return fmt(x.cant) + " " + esc(x.und); }).join("  ·  ") + '</div>' +
       '</div></div>' +
-    avisoPend + formTU + reglas + avisos + tabla +
+    avisoPend + formTU + formEQ + formMO + reglas + avisos + tabla +
     '<div class="card"><div class="chd"><span class="ct">Consideraciones del análisis</span></div>' +
       '<div class="cbd"><textarea class="in" id="notaapu" ' +
       'placeholder="Por qué se armó así, qué se asumió, qué quedó por fuera.">' + esc(nota) + '</textarea></div></div>';
@@ -1906,6 +2127,102 @@ function enlazarPanel(p) {
       el.onchange = function () { aplicar(true); };
       el.onkeydown = function (e) { if (e.key === "Enter") { e.preventDefault(); el.blur(); } };
     }
+  });
+
+  /* --- equipos --- */
+  var masE = document.getElementById("masEQ");
+  if (masE) masE.onclick = function () {
+    var d = datosDe(p, act.apu);
+    if (!d.EQ) d.EQ = [];
+    d.EQ.push({ familia: "", subfamilia: "", manoObra: "", crearItem: false, nombreItem: "", codItem: "" });
+    Store.guardar(p); refrescarPanel(p);
+  };
+  Array.prototype.forEach.call(document.querySelectorAll("[data-quitaeq]"), function (b) {
+    b.onclick = function () {
+      var d = datosDe(p, act.apu);
+      d.EQ.splice(Number(b.dataset.quitaeq), 1);
+      Store.guardar(p); refrescarPanel(p);
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-eqchk]"), function (c) {
+    c.onchange = function () {
+      var d = datosDe(p, act.apu);
+      var f = d.EQ[Number(c.dataset.eqchk)];
+      if (!f) return;
+      f.crearItem = c.checked;
+      if (!c.checked) { f.codItem = ""; }
+      Store.guardar(p); refrescarPanel(p);
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-eq]"), function (el) {
+    var partes = el.dataset.eq.split("|"), campo = partes[1];
+    var aplicar = function () {
+      var d = datosDe(p, act.apu);
+      var f = d.EQ && d.EQ[Number(partes[0])];
+      if (!f) return;
+      var valor = campo === "manoObra" ? el.value : el.value;
+      if (f[campo] === valor) return;
+      f[campo] = valor;
+      if (campo === "familia") { f.subfamilia = ""; }
+      Store.guardar(p); refrescarPanel(p);
+    };
+    el.onchange = aplicar;
+    if (el.tagName === "INPUT") el.onkeydown = function (e) {
+      if (e.key === "Enter") { e.preventDefault(); el.blur(); }
+    };
+  });
+
+  /* --- módulos --- */
+  var masM = document.getElementById("masMO");
+  if (masM) masM.onclick = function () {
+    var d = datosDe(p, act.apu);
+    if (!d.mo) d.mo = [];
+    d.mo.push({ item: "", cantidad: 1 });
+    Store.guardar(p); refrescarPanel(p);
+  };
+  Array.prototype.forEach.call(document.querySelectorAll("[data-quitamo]"), function (b) {
+    b.onclick = function () {
+      var d = datosDe(p, act.apu);
+      d.mo.splice(Number(b.dataset.quitamo), 1);
+      Store.guardar(p); refrescarPanel(p);
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-mo]"), function (el) {
+    var partes = el.dataset.mo.split("|"), campo = partes[1];
+    el.onchange = function () {
+      var d = datosDe(p, act.apu);
+      var f = d.mo && d.mo[Number(partes[0])];
+      if (!f) return;
+      f[campo] = campo === "cantidad" ? (Number(el.value) || 0) : el.value;
+      Store.guardar(p); refrescarPanel(p);
+    };
+    if (el.tagName === "INPUT") el.onkeydown = function (e) {
+      if (e.key === "Enter") { e.preventDefault(); el.blur(); }
+    };
+  });
+
+  /* --- poner precio a un insumo desde el análisis --- */
+  Array.prototype.forEach.call(document.querySelectorAll("[data-poner]"), function (el) {
+    el.onchange = function () {
+      var cat = Catalogo.leer();
+      var idx = Catalogo.indice(cat);
+      var i = idx[el.dataset.poner];
+      if (i === undefined) return;
+      cat.items[i].precio = Number(el.value) || 0;
+      cat.items[i].act = new Date().toISOString();
+      Catalogo.guardar(cat); refrescarPanel(p);
+    };
+    el.onkeydown = function (e) { if (e.key === "Enter") { e.preventDefault(); el.blur(); } };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-imp]"), function (c) {
+    c.onchange = function () {
+      var cat = Catalogo.leer();
+      var idx = Catalogo.indice(cat);
+      var i = idx[c.dataset.imp];
+      if (i === undefined) return;
+      cat.items[i].imp = c.checked;
+      Catalogo.guardar(cat); refrescarPanel(p);
+    };
   });
 
   var nt = document.getElementById("notaapu");
