@@ -99,6 +99,11 @@ function codigoItem(v) {
   return s;
 }
 function fmt(n) { return Number(n).toLocaleString("es-CO"); }
+function dec(n) {
+  var v = Number(n);
+  if (!isFinite(v)) return "0";
+  return v.toLocaleString("es-CO", { minimumFractionDigits: 0, maximumFractionDigits: 4 });
+}
 function cop(n) { return "$" + Math.round(Number(n) || 0).toLocaleString("es-CO"); }
 function hoy() { return new Date().toISOString().slice(0, 10); }
 function fecha(s) {
@@ -1827,7 +1832,17 @@ function refrescarPanel(p, foco) {
   if (!act || !cat) return;
 
   var panel = document.getElementById("panelapu");
-  if (panel) { panel.innerHTML = panelApu(p, cat, act); enlazarPanel(p); }
+  if (panel) {
+    var html;
+    try { html = panelApu(p, cat, act); }
+    catch (e) {
+      avisoError("Al dibujar el análisis: " + (e && e.message ? e.message : e));
+      html = '<div class="card"><div class="cbd"><div class="err">No se pudo dibujar este análisis. ' +
+        'El detalle está en el aviso de abajo.</div></div></div>';
+    }
+    panel.innerHTML = html;
+    try { enlazarPanel(p); } catch (e) { avisoError("Al conectar los controles: " + (e && e.message ? e.message : e)); }
+  }
 
   var lst = document.getElementById("listaapu");
   if (lst) { lst.innerHTML = listaApu(p, analisisDe(p), act); enlazarLista(p); }
