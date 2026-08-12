@@ -102,13 +102,21 @@ function esNum(v) {
 }
 function aNum(v) {
   if (v === null || v === undefined || v === "") return 0;
+  if (typeof v === "number") return isFinite(v) ? v : 0;
   var s = String(v).trim();
-  /* Formato colombiano: 1.234,56 → 1234.56 */
-  if (/,\d{1,3}$/.test(s)) s = s.replace(/\./g, "").replace(",", ".");
+  /* Se quitan símbolos de moneda, espacios normales y duros, y paréntesis de negativo */
+  var neg = /^\(.*\)$/.test(s);
+  s = s.replace(/[$€£\s\u00a0\u202f()]/g, "");
+  if (!s) return 0;
+  /* 1.234,56 → 1234.56   |   1,234.56 → 1234.56 */
+  if (/,\d{1,2}$/.test(s)) s = s.replace(/\./g, "").replace(",", ".");
+  else if (/^-?\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, "");  /* 1.180 son mil ciento ochenta */
   else s = s.replace(/,/g, "");
   var n = Number(s);
-  return isNaN(n) ? 0 : n;
+  if (isNaN(n)) return 0;
+  return neg ? -n : n;
 }
+
 /* Los códigos de ítem llegan a veces como 3.3399999999999928 */
 function codigoItem(v) {
   if (v === null || v === undefined) return "";
@@ -1508,17 +1516,25 @@ function renderCatalogo() {
         f += '<tr class="ofrow"><td colspan="7"><div class="oflista">' +
           ofs.map(function (o, j) {
             var elegido = (i.sel !== undefined ? i.sel : 0) === j;
-            return '<label class="ofitem' + (elegido ? " on" : "") + '">' +
-              '<input type="radio" name="of_' + esc(i.cod) + '" data-elige-of="' + esc(i.cod) + '|' + j + '"' +
-                (elegido ? " checked" : "") + '>' +
-              '<span class="ofmarca">' + esc(o.marca || "sin marca") + '</span>' +
-              '<span class="ofnombre">' + esc(o.nombre || "") + '</span>' +
-              '<span class="ofcod m">' + esc(o.codAur || "") + '</span>' +
-              '<span class="ofprecio m">' + (Number(o.precio) > 0 ? cop(o.precio) : "sin precio") + '</span>' +
-              (o.estado && limpia(o.estado) !== "ACTIVO" ? '<span class="ofest">' + esc(o.estado) + '</span>' : "") +
-            '</label>';
+            var kk = esc(i.cod) + "|" + j;
+            return '<div class="ofitem' + (elegido ? " on" : "") + '">' +
+              '<input type="radio" name="of_' + esc(i.cod) + '" data-elige-of="' + kk + '"' +
+                (elegido ? " checked" : "") + ' title="Usar esta oferta por defecto">' +
+              '<input class="in ofin ofmarca" data-edof="' + kk + '|marca" value="' + esc(o.marca || "") +
+                '" placeholder="marca">' +
+              '<input class="in ofin ofnombre" data-edof="' + kk + '|nombre" value="' + esc(o.nombre || "") +
+                '" placeholder="nombre del proveedor">' +
+              '<input class="in ofin ofcod m" data-edof="' + kk + '|codAur" value="' + esc(o.codAur || "") +
+                '" placeholder="cód.">' +
+              '<input class="in ofin ofprecio m" type="number" min="0" step="1" data-edof="' + kk + '|precio" value="' +
+                (Number(o.precio) > 0 ? o.precio : "") + '" placeholder="sin precio">' +
+              '<button class="btnx btnxdel" data-quitaof="' + kk + '" title="Quitar esta oferta">×</button>' +
+            '</div>';
           }).join("") +
-          '<div class="ofnota">El elegido aquí es el que se usa por defecto. Cada proyecto puede cambiarlo en su paso de insumos.</div>' +
+          '<div class="ofpie">' +
+            '<button class="btn btnmini" data-masof="' + esc(i.cod) + '">+ Agregar proveedor</button>' +
+            '<span class="ofnota">El marcado es el que se usa por defecto. Cada proyecto puede cambiarlo en su paso de insumos.</span>' +
+          '</div>' +
         '</div></td></tr>';
       }
       return f;
@@ -1541,6 +1557,7 @@ function renderCatalogo() {
           '<button class="btn btnp" id="actualizar">Actualizar precios</button>' +
           '<button class="btn" id="cargarofertas">Cargar proveedores</button>' +
           '<button class="btn" id="expcat">Descargar catálogo</button>' +
+          '<button class="btn" id="expof">Descargar proveedores</button>' +
           '<button class="btn" id="recargar">Reemplazar catálogo</button>' +
         '</div>' +
         '<input type="file" id="fcat" accept=".xlsx,.xlsm,.xls" class="hide">' +
@@ -1679,6 +1696,46 @@ function renderCatalogo() {
     };
   });
 
+  Array.prototype.forEach.call(document.querySelectorAll("[data-edof]"), function (el) {
+    el.onchange = function () {
+      var q = el.dataset.edof.split("|");
+      var c = Catalogo.leer();
+      var i = Catalogo.indice(c)[q[0]];
+      if (i === undefined || !c.items[i].ofertas) return;
+      var of = c.items[i].ofertas[Number(q[1])];
+      if (!of) return;
+      of[q[2]] = q[2] === "precio" ? (Number(el.value) || 0) : el.value;
+      c.items[i].act = new Date().toISOString();
+      Catalogo.guardar(c);
+      var y = window.scrollY; render(); window.scrollTo(0, y);
+    };
+    el.onkeydown = function (e) { if (e.key === "Enter") { e.preventDefault(); el.blur(); } };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-quitaof]"), function (b) {
+    b.onclick = function () {
+      var q = b.dataset.quitaof.split("|");
+      var c = Catalogo.leer();
+      var i = Catalogo.indice(c)[q[0]];
+      if (i === undefined || !c.items[i].ofertas) return;
+      c.items[i].ofertas.splice(Number(q[1]), 1);
+      if (c.items[i].sel >= c.items[i].ofertas.length) c.items[i].sel = 0;
+      Catalogo.guardar(c);
+      var y = window.scrollY; render(); window.scrollTo(0, y);
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-masof]"), function (b) {
+    b.onclick = function () {
+      var c = Catalogo.leer();
+      var i = Catalogo.indice(c)[b.dataset.masof];
+      if (i === undefined) return;
+      if (!c.items[i].ofertas) c.items[i].ofertas = [];
+      c.items[i].ofertas.push({ marca: "", codAur: "", nombre: "", precio: 0, und: "", codCla: "", estado: "Activo" });
+      if (c.items[i].sel === undefined) c.items[i].sel = 0;
+      Catalogo.guardar(c);
+      var y = window.scrollY; render(); window.scrollTo(0, y);
+    };
+  });
+
   var co = document.getElementById("cargarofertas");
   if (co) co.onclick = function () { ir({ pantalla: "ofertas", precios: null }); };
 
@@ -1687,16 +1744,47 @@ function renderCatalogo() {
 
   var exp = document.getElementById("expcat");
   if (exp) exp.onclick = function () {
-    var datos = [["CODIGO", "DESCRIPCION", "UNIDAD", "PRECIO", "PRECIO ANTERIOR", "PROVEEDOR", "CODIGO PROVEEDOR", "ACTUALIZADO"]];
+    var datos = [["CODIGO", "DESCRIPCION", "UNIDAD", "PRECIO COSTO", "DESP %", "IMPORTADO",
+                  "PROVEEDOR ELEGIDO", "CODIGO AURANET", "N OFERTAS", "ACTUALIZADO"]];
     cat.items.forEach(function (i) {
-      datos.push([i.cod, i.desc, i.und, i.precio, i.precioAnt || "", i.prov || "", i.codProv || "",
-        i.act ? i.act.slice(0, 10) : ""]);
+      var ofs = i.ofertas || [];
+      var of = ofs.length ? (ofs[i.sel !== undefined && ofs[i.sel] ? i.sel : 0]) : null;
+      var costo = of && Number(of.precio) > 0 ? Number(of.precio) : Number(i.precio) || 0;
+      datos.push([i.cod, i.desc, i.und, costo, i.desp || 0, i.imp ? "SI" : "",
+                  of ? of.marca : "", of ? of.codAur : "", ofs.length,
+                  i.act ? i.act.slice(0, 10) : ""]);
     });
     var ws = XLSX.utils.aoa_to_sheet(datos);
-    ws["!cols"] = [{ wch: 14 }, { wch: 58 }, { wch: 8 }, { wch: 13 }, { wch: 13 }, { wch: 18 }, { wch: 16 }, { wch: 12 }];
+    ws["!cols"] = [{ wch: 14 }, { wch: 58 }, { wch: 8 }, { wch: 14 }, { wch: 8 }, { wch: 11 },
+                   { wch: 18 }, { wch: 15 }, { wch: 11 }, { wch: 12 }];
     var wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "CATALOGO");
-    XLSX.writeFile(wb, "catalogo_insumos.xlsx");
+    XLSX.writeFile(wb, "catalogo_insumos_" + hoy() + ".xlsx");
+  };
+
+  var eo = document.getElementById("expof");
+  if (eo) eo.onclick = function () {
+    var datos = [["Codigo_Material", "Descripcion Material", "Nombre_Auranet", "Codigo_Auranet",
+                  "Marca", "Precio_Auranet", "Unidad", "Cod Clase", "Estado", "ELEGIDO"]];
+    var n = 0;
+    cat.items.forEach(function (i) {
+      var ofs = i.ofertas || [];
+      if (!ofs.length) return;
+      var selJ = i.sel !== undefined && ofs[i.sel] ? i.sel : 0;
+      ofs.forEach(function (o, j) {
+        n++;
+        datos.push([i.cod, i.desc, o.nombre || "", o.codAur || "", o.marca || "",
+                    Number(o.precio) || 0, o.und || i.und || "", o.codCla || "",
+                    o.estado || "", j === selJ ? "SI" : ""]);
+      });
+    });
+    if (!n) { avisoError("Todavía no hay ofertas de proveedor cargadas."); return; }
+    var ws = XLSX.utils.aoa_to_sheet(datos);
+    ws["!cols"] = [{ wch: 15 }, { wch: 52 }, { wch: 46 }, { wch: 15 }, { wch: 16 },
+                   { wch: 14 }, { wch: 8 }, { wch: 11 }, { wch: 10 }, { wch: 9 }];
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "PROVEEDORES");
+    XLSX.writeFile(wb, "proveedores_" + hoy() + ".xlsx");
   };
 }
 

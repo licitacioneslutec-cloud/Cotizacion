@@ -282,13 +282,15 @@ tr[data-aj] td:first-child{box-shadow:inset 3px 0 0 var(--lime);}
 .ofbtn:focus-visible{outline:2px solid var(--lime);outline-offset:1px;}
 .ofrow td{background:#F7FAF1;padding:10px 12px !important;}
 .oflista{display:flex;flex-direction:column;gap:4px;}
-.ofitem{display:flex;gap:10px;align-items:center;padding:5px 8px;border-radius:4px;
-  background:#fff;border:1px solid var(--line);cursor:pointer;font-size:12px;}
+.ofitem{display:flex;gap:7px;align-items:center;padding:5px 8px;border-radius:4px;
+  background:#fff;border:1px solid var(--line);font-size:12px;}
 .ofitem.on{border-color:var(--limedk);background:#F2F8E6;}
-.ofmarca{font-weight:500;min-width:96px;color:var(--ink);}
-.ofnombre{flex:1;color:var(--ink2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.ofcod{font-size:11px;color:var(--ink3);min-width:62px;}
-.ofprecio{min-width:88px;text-align:right;color:var(--ink);}
+.ofin{padding:3px 7px;font-size:12px;}
+.ofmarca{width:118px;flex-shrink:0;font-weight:500;}
+.ofnombre{flex:1;min-width:120px;}
+.ofcod{width:82px;flex-shrink:0;font-size:11px;}
+.ofprecio{width:104px;flex-shrink:0;text-align:right;}
 .ofest{font-size:10px;color:var(--err);text-transform:uppercase;letter-spacing:.06em;}
-.ofnota{font-size:11px;color:var(--ink3);padding-top:4px;}
+.ofpie{display:flex;gap:10px;align-items:center;padding-top:6px;flex-wrap:wrap;}
+.ofnota{font-size:11px;color:var(--ink3);}
 .inprov{padding:3px 6px;font-size:11.5px;}
