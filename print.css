@@ -1,0 +1,97 @@
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+:root{
+  --navy:#0F2436; --lime:#A6CE39; --limedk:#6F9418;
+  --line:#D8DEE4; --line2:#EDF0F3; --ink:#152534; --ink2:#5A6B7B; --ink3:#8A99A7;
+}
+*{box-sizing:border-box;}
+body{
+  font-family:'Inter',system-ui,sans-serif; color:var(--ink); background:#fff;
+  margin:0; padding:0 26px 40px; font-size:11px; line-height:1.45;
+  max-width:1000px; margin:0 auto; -webkit-font-smoothing:antialiased;
+}
+
+/* barra que no se imprime */
+.barra{position:sticky;top:0;background:var(--navy);color:#fff;margin:0 -26px 22px;padding:11px 26px;
+  display:flex;align-items:center;gap:14px;z-index:9;}
+.barra button{font-family:'Barlow Condensed',sans-serif;font-weight:600;font-size:13px;letter-spacing:.07em;
+  text-transform:uppercase;padding:7px 16px;border-radius:4px;border:0;background:var(--lime);
+  color:var(--navy);cursor:pointer;}
+.barra button:hover{background:#B8DB53;}
+.barra span{font-size:12px;color:#B8C4D0;}
+
+/* membrete */
+.mem{display:flex;align-items:center;gap:15px;padding:14px 0 13px;border-bottom:2.5px solid var(--lime);}
+.lg{width:54px;height:54px;object-fit:contain;flex-shrink:0;}
+.memtx{flex:1;}
+.memmarca{font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:17px;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--navy);}
+.memweb{font-size:11px;color:var(--limedk);letter-spacing:.04em;}
+.memfec{font-size:11px;color:var(--ink3);font-family:'IBM Plex Mono',monospace;}
+
+h1{font-family:'Barlow Condensed',sans-serif;font-weight:600;font-size:26px;letter-spacing:.03em;
+  text-transform:uppercase;color:var(--navy);margin:22px 0 14px;}
+h2{font-family:'Barlow Condensed',sans-serif;font-weight:600;font-size:17px;letter-spacing:.07em;
+  text-transform:uppercase;color:var(--navy);margin:26px 0 10px;padding-bottom:5px;
+  border-bottom:1px solid var(--line);}
+h3{font-family:'Barlow Condensed',sans-serif;font-weight:600;font-size:13px;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--ink2);margin:18px 0 7px;}
+
+/* datos del proyecto */
+table.datos{width:100%;border-collapse:collapse;margin-bottom:6px;}
+table.datos td{padding:5px 8px;border-bottom:1px solid var(--line2);}
+table.datos td.k{font-family:'Barlow Condensed',sans-serif;font-size:10.5px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink3);width:13%;}
+
+/* resumen */
+table.res{width:100%;max-width:460px;border-collapse:collapse;margin-bottom:8px;}
+table.res td{padding:5px 8px;border-bottom:1px solid var(--line2);}
+table.res td.k{color:var(--ink2);}
+table.res td.v{text-align:right;font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums;}
+table.res tr.sec td{background:#F4F6F8;font-family:'Barlow Condensed',sans-serif;font-size:10.5px;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--ink2);font-weight:600;padding:6px 8px;}
+table.res tr.tot td{font-weight:600;color:var(--ink);border-top:1px solid var(--line);}
+table.res tr.gran td{font-weight:600;font-size:13px;color:var(--navy);border-top:2px solid var(--navy);
+  border-bottom:0;padding-top:8px;}
+
+/* tablas de cotización y análisis */
+table.cot{width:100%;border-collapse:collapse;margin-bottom:12px;}
+table.cot th{background:var(--navy);color:#fff;font-family:'Barlow Condensed',sans-serif;font-size:10px;
+  letter-spacing:.08em;text-transform:uppercase;font-weight:600;text-align:left;padding:6px 6px;}
+table.cot td{padding:4px 6px;border-bottom:1px solid var(--line2);vertical-align:top;}
+table.cot td.n{text-align:right;font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums;}
+table.cot td.c{font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--ink2);}
+table.cot tr.cap td{background:#F4F6F8;font-family:'Barlow Condensed',sans-serif;font-size:10.5px;
+  letter-spacing:.08em;text-transform:uppercase;color:var(--ink2);font-weight:600;padding:5px 6px;}
+table.cot tr.sub td{font-weight:500;border-top:1px solid var(--line);background:#FAFBFC;}
+table.cot tr.tot td{font-weight:600;color:var(--navy);border-top:1.5px solid var(--navy);background:#F4F6F8;}
+table.cot tbody tr:nth-child(even):not(.cap):not(.sub):not(.tot){background:#FCFDFD;}
+
+/* análisis */
+.apu{margin-bottom:20px;break-inside:avoid;}
+.apuhd{display:flex;gap:11px;align-items:baseline;padding:6px 0 5px;border-bottom:1.5px solid var(--lime);
+  margin-bottom:7px;flex-wrap:wrap;}
+.apun{font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:15px;letter-spacing:.06em;color:var(--navy);}
+.apui{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--ink3);}
+.apud{flex:1;font-size:11px;color:var(--ink2);}
+.nota{font-size:10.5px;color:var(--ink2);background:#FDF6E7;border-left:2.5px solid #EBD9A8;
+  padding:6px 9px;margin:0 0 6px;}
+
+.cons{margin-top:16px;}
+.cons p{margin:0 0 4px;color:var(--ink2);}
+.salto{break-before:page;}
+.pie{margin-top:28px;padding-top:9px;border-top:1px solid var(--line);text-align:center;
+  font-size:10px;color:var(--ink3);letter-spacing:.05em;}
+
+@media print{
+  @page{size:letter;margin:14mm 12mm;}
+  body{padding:0;font-size:9.5px;max-width:none;}
+  .no-print{display:none !important;}
+  .mem{padding-top:0;}
+  h1{font-size:22px;margin-top:12px;}
+  table.cot th{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  table.cot tr.cap td,table.cot tr.tot td,table.res tr.sec td{
+    -webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  thead{display:table-header-group;}
+  tr{break-inside:avoid;}
+}

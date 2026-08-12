@@ -43,6 +43,27 @@ var CLAVE_CAT = "apu.catalogo.v1";
 var CLAVE_HIST = "apu.historial.v1";
 
 /* Roles de columna que buscamos en un archivo de precios de proveedor */
+/* Columnas de una lista de proveedor con ofertas por marca */
+var ROLES_OFERTA = [
+  { id: "cod",    nombre: "Código del material", test: function (t) {
+      return t === "codigomaterial" || t === "codigo" || t === "codmaterial" || t === "codigodeinsumo"; } },
+  { id: "nombre", nombre: "Nombre del proveedor", test: function (t) {
+      return t.indexOf("nombreauranet") === 0 || t.indexOf("nombreproveedor") === 0 || t === "nombre"; } },
+  { id: "codAur", nombre: "Código Auranet", test: function (t) {
+      return t.indexOf("codigoauranet") === 0 || t.indexOf("codauranet") === 0; } },
+  { id: "marca",  nombre: "Marca o clase", test: function (t) {
+      return t === "marca" || t === "clase" || t === "proveedor"; } },
+  { id: "precio", nombre: "Precio", test: function (t) {
+      return t.indexOf("precio") === 0 || t === "valor" || t === "costo"; } },
+  { id: "und",    nombre: "Unidad", test: function (t) {
+      return t === "und" || t === "un" || t === "unidad" || t === "um"; } },
+  { id: "codCla", nombre: "Código de clase", test: function (t) {
+      return t.indexOf("codclase") === 0 || t.indexOf("codigoclase") === 0; } },
+  { id: "estado", nombre: "Estado", test: function (t) { return t === "estado"; } },
+  { id: "desc",   nombre: "Descripción del material", test: function (t) {
+      return t.indexOf("descripcionmaterial") === 0 || t.indexOf("descripcion") === 0; } }
+];
+
 var ROLES_PRECIO = [
   { id: "cod",    nombre: "Código del insumo", test: function (t) {
       return t === "codigo" || t === "codigos" || t === "cod" || t === "code" ||
@@ -396,6 +417,57 @@ function leerListaPrecios(buffer) {
     });
   });
   return hojas;
+}
+
+/* Lee una lista de ofertas: varios proveedores para el mismo código */
+function leerOfertas(hoja, mapa, cat) {
+  var idx = Catalogo.indice(cat);
+  var nuevas = [], fuera = [], vistos = {};
+  for (var i = hoja.encabezado + 1; i < hoja.filas.length; i++) {
+    var f = hoja.filas[i] || [];
+    var cod = codClave(f[mapa.cod]);
+    if (!cod || cod === "NAN") continue;
+    var precio = mapa.precio !== undefined ? aNum(f[mapa.precio]) : 0;
+    var marca = mapa.marca !== undefined ? txt(f[mapa.marca]) : "";
+    var codAur = mapa.codAur !== undefined ? txt(f[mapa.codAur]) : "";
+    var clave = cod + "|" + marca + "|" + codAur;
+    if (vistos[clave]) continue;
+    vistos[clave] = true;
+    var of = {
+      marca: marca, codAur: codAur,
+      nombre: mapa.nombre !== undefined ? txt(f[mapa.nombre]) : "",
+      precio: precio,
+      und: mapa.und !== undefined ? txt(f[mapa.und]) : "",
+      codCla: mapa.codCla !== undefined ? txt(f[mapa.codCla]) : "",
+      estado: mapa.estado !== undefined ? txt(f[mapa.estado]) : ""
+    };
+    if (idx[cod] === undefined) { fuera.push({ cod: cod, of: of }); continue; }
+    nuevas.push({ cod: cod, of: of });
+  }
+  return { nuevas: nuevas, fuera: fuera };
+}
+
+/* Mete las ofertas en el catálogo, reemplazando las de la misma marca */
+function aplicarOfertas(cat, nuevas) {
+  var idx = Catalogo.indice(cat);
+  var tocados = {}, agregadas = 0, reemplazadas = 0;
+  nuevas.forEach(function (n) {
+    var it = cat.items[idx[n.cod]];
+    if (!it) return;
+    if (!it.ofertas) it.ofertas = [];
+    var pos = -1;
+    for (var i = 0; i < it.ofertas.length; i++) {
+      var o = it.ofertas[i];
+      if (limpia(o.marca) === limpia(n.of.marca) &&
+          (!n.of.codAur || txt(o.codAur) === txt(n.of.codAur))) { pos = i; break; }
+    }
+    if (pos >= 0) { it.ofertas[pos] = n.of; reemplazadas++; }
+    else { it.ofertas.push(n.of); agregadas++; }
+    if (it.sel === undefined) it.sel = 0;
+    it.act = new Date().toISOString();
+    tocados[n.cod] = true;
+  });
+  return { agregadas: agregadas, reemplazadas: reemplazadas, insumos: Object.keys(tocados).length };
 }
 
 /* Compara una lista de precios contra el catálogo vigente */
@@ -1076,8 +1148,24 @@ function componerAnalisis(cat, datos, p, apu) {
 /* Precio de venta de un insumo: al costo se le monta la rentabilidad y,
    si es importado, el factor de dólar. Ambos sobre el precio de venta,
    igual que en la hoja de márgenes: costo / (1 - factor). */
-function precioAjustado(it, mg) {
-  var base = it ? Number(it.precio) || 0 : 0;
+/* Oferta vigente de un insumo: la que eligió el proyecto, o la marcada
+   por defecto en el catálogo, o el precio suelto si no hay ofertas. */
+function ofertaDe(it, p) {
+  if (!it || !it.ofertas || !it.ofertas.length) return null;
+  var sel = null;
+  if (p && p.proveedores && p.proveedores[it.cod] !== undefined) sel = p.proveedores[it.cod];
+  if (sel === null || sel === undefined || !it.ofertas[sel]) sel = (it.sel !== undefined ? it.sel : 0);
+  return it.ofertas[sel] || it.ofertas[0];
+}
+function costoDe(it, p) {
+  if (!it) return 0;
+  var of = ofertaDe(it, p);
+  if (of && Number(of.precio) > 0) return Number(of.precio);
+  return Number(it.precio) || 0;
+}
+
+function precioAjustado(it, mg, p) {
+  var base = costoDe(it, p);
   if (base <= 0) return 0;
   var rent = it.rent !== undefined && it.rent !== null ? Number(it.rent) : Number(mg.rent || 0);
   var dol = it.imp ? (it.dol !== undefined && it.dol !== null ? Number(it.dol) : Number(mg.dolar || 0)) : 0;
@@ -1088,15 +1176,15 @@ function precioAjustado(it, mg) {
 }
 
 /* Le pone precio a cada línea y arma las tres secciones del análisis */
-function valorizar(cat, lineas, margenes) {
+function valorizar(cat, lineas, margenes, p) {
   var idx = Catalogo.indice(cat);
   var mg = margenes || {};
   var mat = 0, mo = 0, sinPrecio = 0;
 
   var conPrecio = lineas.map(function (l) {
     var it = idx[l.cod] !== undefined ? cat.items[idx[l.cod]] : null;
-    var base = it ? Number(it.precio) || 0 : 0;
-    var precio = precioAjustado(it, mg);
+    var base = costoDe(it, p);
+    var precio = precioAjustado(it, mg, p);
     var desp = it && Number(it.desp) > 0 ? Number(it.desp) : 0;
     var cantDesp = l.cant * (1 + desp / 100);
     var total = cantDesp * precio;
@@ -1108,12 +1196,16 @@ function valorizar(cat, lineas, margenes) {
       cod: l.cod, desc: l.desc || (it ? it.desc : ""),
       und: l.und || (it ? it.und : ""), base: base, precio: precio, total: total,
       falta: precio <= 0, mo: esMo, f075: l.f075, ajustada: l.ajustada, cantOrig: l.cantOrig,
-      propio: l.propio, imp: it ? !!it.imp : false, enCatalogo: !!it
+      propio: l.propio, imp: it ? !!it.imp : false, enCatalogo: !!it,
+      oferta: ofertaDe(it, p)
     };
   });
 
-  var pctTrans = Number(mg.transporte) || 0;
-  var pctHerr = Number(mg.herramienta) || 0;
+  var ov = (mg && mg.__ov) || {};
+  var pctTrans = ov.transporte !== undefined && ov.transporte !== null && ov.transporte !== ""
+    ? Number(ov.transporte) : (Number(mg.transporte) || 0);
+  var pctHerr = ov.herramienta !== undefined && ov.herramienta !== null && ov.herramienta !== ""
+    ? Number(ov.herramienta) : (Number(mg.herramienta) || 0);
   var transporte = mat * (pctTrans / 100);
   var herramienta = mat * (pctHerr / 100);
   var th = transporte + herramienta;
@@ -1123,9 +1215,19 @@ function valorizar(cat, lineas, margenes) {
     lineas: conPrecio,
     mat: mat, transporte: transporte, herramienta: herramienta, th: th, mo: mo,
     directo: directo, unitario: directo, sinPrecio: sinPrecio,
+    pctTrans: pctTrans, pctHerr: pctHerr, ovTrans: ov.transporte, ovHerr: ov.herramienta,
     matConTh: mat + th,
     pesoMo: directo > 0 ? Math.round((mo / directo) * 100) : 0
   };
+}
+
+/* Los márgenes del proyecto, con la excepción que tenga ese análisis */
+function margenesDe(p, apu) {
+  var mg = {};
+  Object.keys(p.margenes || {}).forEach(function (k) { mg[k] = p.margenes[k]; });
+  var d = (p.datosApu && p.datosApu[apu]) || {};
+  mg.__ov = d.pct || {};
+  return mg;
 }
 
 /* ------------------------------------------------------------------
@@ -1145,7 +1247,7 @@ function totalesProyecto(p, cat) {
       analisis++;
       var datos = (p.datosApu && p.datosApu[a.apu]) || {};
       var comp = componerAnalisis(cat, datos, p, a.apu);
-      var val = valorizar(cat, comp.lineas, mg);
+      var val = valorizar(cat, comp.lineas, margenesDe(p, a.apu), p);
       porApu[a.apu] = {
         unitario: val.unitario, matConTh: val.matConTh, mo: val.mo,
         sinPrecio: val.sinPrecio, lineas: comp.lineas.length
@@ -1329,6 +1431,7 @@ function siguienteApu(p) {
 function render() {
   if (vista.pantalla === "catalogo") return renderCatalogo();
   if (vista.pantalla === "precios") return renderPrecios();
+  if (vista.pantalla === "ofertas") return renderOfertas();
   if (vista.pantalla === "proyectos") return renderProyectos();
   if (vista.pantalla === "nuevo") return renderNuevo();
   return renderProyecto();
@@ -1376,18 +1479,49 @@ function renderCatalogo() {
     var muestra = lista.slice(0, tope);
 
     var filas = muestra.map(function (i) {
-      var tiene = Number(i.precio) > 0;
-      return '<tr' + (tiene ? "" : ' class="filasinp"') + '>' +
+      var ofs = i.ofertas || [];
+      var of = ofs.length ? ofs[i.sel !== undefined && ofs[i.sel] ? i.sel : 0] : null;
+      var costo = of && Number(of.precio) > 0 ? Number(of.precio) : Number(i.precio) || 0;
+      var tiene = costo > 0;
+      var abierto = vista.abierto === i.cod;
+
+      var f = '<tr' + (tiene ? "" : ' class="filasinp"') + '>' +
         '<td class="m" style="font-size:12px">' + esc(i.cod) + '</td>' +
-        '<td>' + esc(i.desc) + '</td>' +
+        '<td>' + esc(i.desc) +
+          (ofs.length ? '<button class="ofbtn" data-abrir-of="' + esc(i.cod) + '">' +
+            ofs.length + (ofs.length === 1 ? " proveedor" : " proveedores") +
+            (of && of.marca ? " · " + esc(of.marca) : "") + (abierto ? " ▴" : " ▾") + '</button>' : "") +
+        '</td>' +
         '<td><input class="in inund" data-cund="' + esc(i.cod) + '" value="' + esc(i.und || "") + '"></td>' +
-        '<td class="num"><input class="in m inprecio' + (tiene ? " ok" : "") + '" type="number" min="0" step="1" ' +
-          'data-cprecio="' + esc(i.cod) + '" value="' + (tiene ? i.precio : "") + '" placeholder="sin precio"></td>' +
+        '<td class="num">' + (ofs.length
+          ? '<span class="m">' + (tiene ? cop(costo) : "—") + '</span>'
+          : '<input class="in m inprecio' + (tiene ? " ok" : "") + '" type="number" min="0" step="1" ' +
+            'data-cprecio="' + esc(i.cod) + '" value="' + (tiene ? i.precio : "") + '" placeholder="sin precio">') + '</td>' +
+        '<td style="text-align:center"><input class="in m indesp" type="number" min="0" max="50" step="1" ' +
+          'data-cdesp="' + esc(i.cod) + '" value="' + (i.desp || "") + '" placeholder="0"></td>' +
         '<td style="text-align:center"><input type="checkbox" data-cimp="' + esc(i.cod) + '"' +
           (i.imp ? " checked" : "") + ' title="Importado: lleva el factor de dólar"></td>' +
-        '<td style="font-size:12px;color:var(--ink3)">' + esc(i.prov || "—") + '</td>' +
         '<td style="font-size:12px;color:var(--ink3)">' + (i.act ? fecha(i.act.slice(0, 10)) : "—") + '</td>' +
       '</tr>';
+
+      if (abierto && ofs.length) {
+        f += '<tr class="ofrow"><td colspan="7"><div class="oflista">' +
+          ofs.map(function (o, j) {
+            var elegido = (i.sel !== undefined ? i.sel : 0) === j;
+            return '<label class="ofitem' + (elegido ? " on" : "") + '">' +
+              '<input type="radio" name="of_' + esc(i.cod) + '" data-elige-of="' + esc(i.cod) + '|' + j + '"' +
+                (elegido ? " checked" : "") + '>' +
+              '<span class="ofmarca">' + esc(o.marca || "sin marca") + '</span>' +
+              '<span class="ofnombre">' + esc(o.nombre || "") + '</span>' +
+              '<span class="ofcod m">' + esc(o.codAur || "") + '</span>' +
+              '<span class="ofprecio m">' + (Number(o.precio) > 0 ? cop(o.precio) : "sin precio") + '</span>' +
+              (o.estado && limpia(o.estado) !== "ACTIVO" ? '<span class="ofest">' + esc(o.estado) + '</span>' : "") +
+            '</label>';
+          }).join("") +
+          '<div class="ofnota">El elegido aquí es el que se usa por defecto. Cada proyecto puede cambiarlo en su paso de insumos.</div>' +
+        '</div></td></tr>';
+      }
+      return f;
     }).join("");
 
     var histFilas = hist.slice(0, 6).map(function (h) {
@@ -1405,6 +1539,7 @@ function renderCatalogo() {
         '</div><div class="bar"><div class="barf" style="width:' + cob.pct + '%"></div></div>' +
         '<div class="btnrow" style="margin-top:15px">' +
           '<button class="btn btnp" id="actualizar">Actualizar precios</button>' +
+          '<button class="btn" id="cargarofertas">Cargar proveedores</button>' +
           '<button class="btn" id="expcat">Descargar catálogo</button>' +
           '<button class="btn" id="recargar">Reemplazar catálogo</button>' +
         '</div>' +
@@ -1423,10 +1558,11 @@ function renderCatalogo() {
             (vista.soloSin ? " checked" : "") + '> Ver solo los que no tienen precio</label>' +
         '</div>' +
         '<div class="scroll"><table class="tbl"><thead><tr>' +
-          '<th style="width:96px">Código</th><th>Descripción</th><th style="width:74px">Und</th>' +
-          '<th style="width:112px" class="num">Precio costo</th>' +
+          '<th style="width:92px">Código</th><th>Descripción</th><th style="width:70px">Und</th>' +
+          '<th style="width:106px" class="num">Precio costo</th>' +
+          '<th style="width:56px;text-align:center" title="Desperdicio">Desp.</th>' +
           '<th style="width:44px;text-align:center" title="Importado">Imp.</th>' +
-          '<th style="width:104px">Proveedor</th><th style="width:88px">Actualizado</th>' +
+          '<th style="width:86px">Actualizado</th>' +
         '</tr></thead><tbody>' +
         filas + '</tbody></table></div>' +
         (lista.length > muestra.length
@@ -1513,6 +1649,7 @@ function renderCatalogo() {
     });
   };
   editar("data-cprecio", function (it, el) { it.precio = Number(el.value) || 0; });
+  editar("data-cdesp", function (it, el) { it.desp = Number(el.value) || 0; });
   editar("data-cund", function (it, el) { it.und = el.value; });
   editar("data-cimp", function (it, el) { it.imp = el.checked; });
 
@@ -1521,6 +1658,29 @@ function renderCatalogo() {
     vista.tope = (vista.tope || 150) + 150;
     var y = window.scrollY; render(); window.scrollTo(0, y);
   };
+
+  Array.prototype.forEach.call(document.querySelectorAll("[data-abrir-of]"), function (b) {
+    b.onclick = function () {
+      var c = b.dataset.abrirOf;
+      vista.abierto = vista.abierto === c ? null : c;
+      var y = window.scrollY; render(); window.scrollTo(0, y);
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-elige-of]"), function (r) {
+    r.onchange = function () {
+      var q = r.dataset.eligeOf.split("|");
+      var c = Catalogo.leer();
+      var ix = Catalogo.indice(c);
+      var i = ix[q[0]];
+      if (i === undefined) return;
+      c.items[i].sel = Number(q[1]);
+      Catalogo.guardar(c);
+      var y = window.scrollY; render(); window.scrollTo(0, y);
+    };
+  });
+
+  var co = document.getElementById("cargarofertas");
+  if (co) co.onclick = function () { ir({ pantalla: "ofertas", precios: null }); };
 
   var act = document.getElementById("actualizar");
   if (act) act.onclick = function () { ir({ pantalla: "precios", precios: null }); };
@@ -1538,6 +1698,166 @@ function renderCatalogo() {
     XLSX.utils.book_append_sheet(wb, ws, "CATALOGO");
     XLSX.writeFile(wb, "catalogo_insumos.xlsx");
   };
+}
+
+/* ---- Carga de proveedores ---- */
+
+function renderOfertas() {
+  var cat = Catalogo.leer();
+  if (!cat) return ir({ pantalla: "catalogo" });
+  var est = vista.precios;
+  var cuerpo;
+
+  if (!est) {
+    cuerpo = '<div class="card"><div class="chd"><span class="ct">Lista de proveedores</span></div><div class="cbd">' +
+      '<p style="margin:0 0 14px;font-size:13px;color:var(--ink2)">Sube el archivo donde cada fila es la oferta ' +
+      'de un proveedor para un código de material. Un mismo código puede venir varias veces con marcas distintas.</p>' +
+      '<button class="drop" id="dropof"><div class="dropt">Soltar la lista de proveedores</div>' +
+      '<div class="dropn">xlsx, xlsm o csv</div></button>' +
+      '<input type="file" id="fof" accept=".xlsx,.xlsm,.xls,.csv" class="hide">' +
+    '</div></div>';
+  } else if (!est.confirmado) {
+    var hoja = est.hojas[est.hoja];
+    var pest = est.hojas.map(function (h, i) {
+      return '<button class="tab" data-hof="' + i + '" aria-pressed="' + (est.hoja === i) + '">' +
+        esc(h.nombre) + (h.ok ? "" : " · sin encabezado") + '</button>';
+    }).join("");
+
+    var mapeo = "";
+    if (hoja.ok) {
+      var ops = function (rol) {
+        var o = '<option value=""' + (rol ? "" : " selected") + '>No usar</option>';
+        ROLES_OFERTA.forEach(function (r) {
+          o += '<option value="' + r.id + '"' + (rol === r.id ? " selected" : "") + '>' + r.nombre + '</option>';
+        });
+        return o;
+      };
+      mapeo = hoja.columnas.map(function (c) {
+        var rol = null;
+        Object.keys(est.mapa).forEach(function (k) { if (est.mapa[k] === c.i) rol = k; });
+        return '<tr><td class="m" style="font-size:12px">' + esc(c.nombre) + '</td>' +
+          '<td><select class="in" data-cof="' + c.i + '">' + ops(rol) + '</select></td></tr>';
+      }).join("");
+    }
+
+    var falta = est.mapa.cod === undefined || est.mapa.precio === undefined;
+    var r = est.lect;
+
+    cuerpo = '<div class="card"><div class="chd"><span class="ct">Lista de proveedores</span>' +
+        '<span class="cn m">' + esc(est.archivo) + '</span></div>' +
+        '<div class="cbd" style="padding-bottom:12px"><div class="tabs">' + pest + '</div></div>' +
+        '<div class="cbd" style="border-top:1px solid var(--line2)">' +
+          (hoja.ok
+            ? '<label class="lbl">Columnas del archivo</label>' +
+              '<div class="scroll"><table class="tbl"><thead><tr><th style="width:46%">En el archivo</th>' +
+              '<th>Corresponde a</th></tr></thead><tbody>' + mapeo + '</tbody></table></div>' +
+              (falta ? '<div class="err" style="margin-top:14px">Hacen falta la columna de código y la de precio.</div>' : "")
+            : '<div class="err">No se encontró encabezado en esta hoja.</div>') +
+        '</div></div>' +
+      (r ? '<div class="card"><div class="cbd">' +
+        '<div class="kpi" style="grid-template-columns:repeat(2,1fr)">' +
+          '<div class="kc"><div class="kk">Ofertas que entran</div><div class="kv">' + r.nuevas.length + '</div></div>' +
+          '<div class="kc"><div class="kk">Códigos que no están</div><div class="kv">' + r.fuera.length + '</div></div>' +
+        '</div>' +
+        (r.fuera.length ? '<div class="note" style="margin:14px 0 0"><div class="notet">Se van a ignorar</div>' +
+          '<div class="noteb">' + r.fuera.length + ' códigos del archivo no existen en el catálogo. Ejemplos: ' +
+          r.fuera.slice(0, 4).map(function (x) { return esc(x.cod); }).join(", ") + '.</div></div>' : "") +
+        '<div class="btnrow" style="margin-top:15px">' +
+          '<button class="btn btnp" id="aplicarof"' + (r.nuevas.length ? "" : " disabled") + '>' +
+            'Aplicar ' + r.nuevas.length + ' ofertas</button>' +
+          '<button class="btn" id="cancelarof">Cancelar</button>' +
+        '</div></div></div>' : "");
+  } else {
+    cuerpo = '<div class="card"><div class="cbd"><div class="ok">' +
+      'Se cargaron ' + est.res.agregadas + ' ofertas nuevas y se actualizaron ' + est.res.reemplazadas +
+      ', repartidas en ' + est.res.insumos + ' insumos.</div>' +
+      '<div class="btnrow" style="margin-top:14px">' +
+        '<button class="btn btnp" id="otraof">Cargar otra lista</button>' +
+        '<button class="btn" id="alcat2">Volver al catálogo</button>' +
+      '</div></div></div>';
+  }
+
+  app.innerHTML = barraTop("catalogo") +
+    '<header class="top"><div class="wrap topin"><div>' +
+      '<div class="brand">Catálogo de insumos</div>' +
+      '<h1 class="d h1">Proveedores por insumo</h1>' +
+      '<div class="sub">Un mismo código puede tener varias marcas con su precio</div>' +
+    '</div></div></header>' +
+    '<main class="wrap main">' + cuerpo + '</main>';
+
+  enlazarTop();
+
+  var input = document.getElementById("fof");
+  var drop = document.getElementById("dropof");
+  if (drop) drop.onclick = function () { input.click(); };
+  if (input) input.onchange = function (e) {
+    var file = e.target.files[0]; if (!file) return;
+    var fr = new FileReader();
+    fr.onload = function () {
+      try {
+        var wb = XLSX.read(new Uint8Array(fr.result), { type: "array" });
+        var hojas = [];
+        wb.SheetNames.forEach(function (n) {
+          var filas = XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: false, defval: null, blankrows: false });
+          var det = detectarCols(filas, ROLES_OFERTA);
+          var cols = [];
+          if (det) cols = (filas[det.fila] || []).map(function (v, i) {
+            var rol = null;
+            Object.keys(det.mapa).forEach(function (k) { if (det.mapa[k] === i) rol = k; });
+            return { i: i, nombre: txt(v), rol: rol };
+          }).filter(function (c) { return c.nombre !== ""; });
+          hojas.push({ nombre: n, filas: filas, ok: !!det, encabezado: det ? det.fila : null,
+                       mapa: det ? det.mapa : {}, columnas: cols });
+        });
+        var i = 0;
+        for (var k = 0; k < hojas.length; k++) {
+          if (hojas[k].ok && hojas[k].mapa.cod !== undefined && hojas[k].mapa.precio !== undefined) { i = k; break; }
+        }
+        var e2 = { archivo: file.name, hojas: hojas, hoja: i, mapa: hojas[i].mapa || {}, confirmado: false };
+        e2.lect = (hojas[i].ok && e2.mapa.cod !== undefined && e2.mapa.precio !== undefined)
+          ? leerOfertas(hojas[i], e2.mapa, cat) : null;
+        ir({ precios: e2 });
+      } catch (err) { avisoError("No se pudo leer ese archivo: " + (err && err.message ? err.message : err)); }
+    };
+    fr.readAsArrayBuffer(file);
+  };
+
+  Array.prototype.forEach.call(document.querySelectorAll("[data-hof]"), function (b) {
+    b.onclick = function () {
+      var i = Number(b.dataset.hof);
+      est.hoja = i; est.mapa = est.hojas[i].mapa || {};
+      est.lect = (est.hojas[i].ok && est.mapa.cod !== undefined && est.mapa.precio !== undefined)
+        ? leerOfertas(est.hojas[i], est.mapa, cat) : null;
+      ir({ precios: est });
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-cof]"), function (sel) {
+    sel.onchange = function () {
+      var mapa = {};
+      Array.prototype.forEach.call(document.querySelectorAll("[data-cof]"), function (x) {
+        if (x.value) mapa[x.value] = Number(x.dataset.cof);
+      });
+      est.mapa = mapa;
+      est.lect = (mapa.cod !== undefined && mapa.precio !== undefined)
+        ? leerOfertas(est.hojas[est.hoja], mapa, cat) : null;
+      ir({ precios: est });
+    };
+  });
+  var ap = document.getElementById("aplicarof");
+  if (ap) ap.onclick = function () {
+    est.res = aplicarOfertas(cat, est.lect.nuevas);
+    Catalogo.guardar(cat);
+    Historial.agregar({ fecha: new Date().toISOString(), archivo: est.archivo,
+                        proveedor: "lista de proveedores", aplicados: est.lect.nuevas.length });
+    est.confirmado = true;
+    ir({ precios: est });
+  };
+  var ca = document.getElementById("cancelarof");
+  if (ca) ca.onclick = function () { ir({ precios: null }); };
+  var ot = document.getElementById("otraof");
+  if (ot) ot.onclick = function () { ir({ precios: null }); };
+  var al = document.getElementById("alcat2");
+  if (al) al.onclick = function () { ir({ pantalla: "catalogo", precios: null }); };
 }
 
 /* ---- Actualización de precios ---- */
@@ -2762,7 +3082,8 @@ function panelApu(p, cat, act) {
 
   /* --- composición: siempre visible, con su estado --- */
   var comp = componerAnalisis(cat, datos, p, act.apu);
-  var val = valorizar(cat, comp.lineas, p.margenes);
+  var mgA = margenesDe(p, act.apu);
+  var val = valorizar(cat, comp.lineas, mgA, p);
   var cuerpoComp;
 
   if (comp.lineas.length) {
@@ -2803,14 +3124,18 @@ function panelApu(p, cat, act) {
     var filasMat = val.lineas.filter(function (l) { return !l.mo; }).map(filaLinea).join("");
     var filasMo = val.lineas.filter(function (l) { return l.mo; }).map(filaLinea).join("");
     var filasTh =
-      (val.transporte > 0 || val.herramienta > 0
+      (val.lineas.length
         ? '<tr><td class="num"></td><td class="m" style="font-size:12px">TR1</td>' +
           '<td>Transportes</td><td style="color:var(--ink3);font-size:12px"></td><td></td>' +
-          '<td class="num" style="color:var(--ink3);font-size:12px">' + dec(p.margenes.transporte || 0) + '%</td>' +
+          '<td class="num"><input class="in m indesp" type="number" min="0" max="100" step="0.5" ' +
+            'data-ovpct="transporte" value="' + (val.ovTrans === undefined || val.ovTrans === "" ? "" : val.ovTrans) +
+            '" placeholder="' + dec(p.margenes.transporte || 0) + '" title="Excepción para este análisis"></td>' +
           '<td class="num">' + cop(val.transporte) + '</td><td></td></tr>' +
           '<tr><td class="num"></td><td class="m" style="font-size:12px">HER1</td>' +
           '<td>Herramienta de mano</td><td style="color:var(--ink3);font-size:12px"></td><td></td>' +
-          '<td class="num" style="color:var(--ink3);font-size:12px">' + dec(p.margenes.herramienta || 0) + '%</td>' +
+          '<td class="num"><input class="in m indesp" type="number" min="0" max="100" step="0.5" ' +
+            'data-ovpct="herramienta" value="' + (val.ovHerr === undefined || val.ovHerr === "" ? "" : val.ovHerr) +
+            '" placeholder="' + dec(p.margenes.herramienta || 0) + '" title="Excepción para este análisis"></td>' +
           '<td class="num">' + cop(val.herramienta) + '</td><td></td></tr>'
         : "");
 
@@ -3083,6 +3408,17 @@ function enlazarPanel(p) {
     el.onkeydown = function (e) { if (e.key === "Enter") { e.preventDefault(); el.blur(); } };
   });
 
+  /* --- excepción de transporte y herramienta en este análisis --- */
+  Array.prototype.forEach.call(document.querySelectorAll("[data-ovpct]"), function (el) {
+    el.onchange = function () {
+      var d = datosDe(p, act.apu);
+      if (!d.pct) d.pct = {};
+      d.pct[el.dataset.ovpct] = el.value === "" ? null : Number(el.value) || 0;
+      Store.guardar(p); refrescarPanel(p);
+    };
+    el.onkeydown = function (e) { if (e.key === "Enter") { e.preventDefault(); el.blur(); } };
+  });
+
   /* --- desperdicio por insumo --- */
   Array.prototype.forEach.call(document.querySelectorAll("[data-desp]"), function (el) {
     el.onchange = function () {
@@ -3331,6 +3667,8 @@ function insumosDe(p, cat) {
     u.precio = it ? Number(it.precio) || 0 : 0;
     u.imp = it ? !!it.imp : false;
     u.desp = it ? Number(it.desp) || 0 : 0;
+    u.ofertas = it ? (it.ofertas || []) : [];
+    u.sel = it ? it.sel : undefined;
     u.enCat = !!it;
     u.mo = esManoObra(c);
     return u;
@@ -3358,22 +3696,35 @@ function vInsumos(p) {
   var mg = p.margenes || {};
   var totalMat = 0, totalMo = 0;
   lista.forEach(function (i) {
-    var v = i.cantidad * precioAjustado({ precio: i.precio, imp: i.imp }, mg);
+    var v = i.cantidad * precioAjustado({ precio: i.precio, imp: i.imp, ofertas: i.ofertas, sel: i.sel, cod: i.cod }, mg, p);
     if (i.mo) totalMo += v; else totalMat += v;
   });
 
   var filas = ver.map(function (i) {
-    var venta = precioAjustado({ precio: i.precio, imp: i.imp }, mg);
-    return '<tr' + (i.precio <= 0 ? ' class="filasinp"' : "") + (i.mo ? ' data-mo="1"' : "") + '>' +
+    var costo = costoDe({ precio: i.precio, ofertas: i.ofertas, sel: i.sel, cod: i.cod }, p);
+    var venta = precioAjustado({ precio: i.precio, imp: i.imp, ofertas: i.ofertas, sel: i.sel, cod: i.cod }, mg, p);
+    return '<tr' + (costo <= 0 ? ' class="filasinp"' : "") + (i.mo ? ' data-mo="1"' : "") + '>' +
       '<td class="m" style="font-size:12px">' + esc(i.cod) + '</td>' +
       '<td>' + esc(i.desc) + '</td>' +
       '<td style="color:var(--ink3);font-size:12px">' + esc(i.und) + '</td>' +
       '<td class="num">' + dec(i.cantidad) + '</td>' +
-      '<td class="num"><input class="in m inprecio' + (i.precio > 0 ? " ok" : "") + '" type="number" min="0" step="1" ' +
-        'data-iprecio="' + esc(i.cod) + '" value="' + (i.precio > 0 ? i.precio : "") + '" placeholder="sin precio"></td>' +
+      '<td class="num">' + (i.ofertas.length
+        ? '<span class="m">' + (costo > 0 ? cop(costo) : "—") + '</span>'
+        : '<input class="in m inprecio' + (i.precio > 0 ? " ok" : "") + '" type="number" min="0" step="1" ' +
+          'data-iprecio="' + esc(i.cod) + '" value="' + (i.precio > 0 ? i.precio : "") + '" placeholder="sin precio">') + '</td>' +
+      '<td>' + (i.ofertas.length
+        ? '<select class="in inprov" data-iprov="' + esc(i.cod) + '">' +
+          i.ofertas.map(function (o, j) {
+            var elegido = (p.proveedores && p.proveedores[i.cod] !== undefined)
+              ? p.proveedores[i.cod] === j : (i.sel !== undefined ? i.sel : 0) === j;
+            return '<option value="' + j + '"' + (elegido ? " selected" : "") + '>' +
+              esc(o.marca || "sin marca") + (Number(o.precio) > 0 ? " · " + cop(o.precio) : " · sin precio") +
+              '</option>';
+          }).join("") + '</select>'
+        : '<span style="color:var(--ink3);font-size:12px">—</span>') + '</td>' +
       '<td style="text-align:center">' + (i.mo ? "" :
         '<input type="checkbox" data-iimp="' + esc(i.cod) + '"' + (i.imp ? " checked" : "") + '>') + '</td>' +
-      '<td class="num">' + (i.precio > 0 ? cop(venta * i.cantidad) : "—") + '</td>' +
+      '<td class="num">' + (costo > 0 ? cop(venta * i.cantidad) : "—") + '</td>' +
       '<td class="m" style="font-size:11px;color:var(--ink3)">' + i.apus.slice(0, 4).join(", ") +
         (i.apus.length > 4 ? " +" + (i.apus.length - 4) : "") + '</td>' +
     '</tr>';
@@ -3402,9 +3753,10 @@ function vInsumos(p) {
       '<div class="scroll"><table class="tbl"><thead><tr>' +
         '<th style="width:96px">Código</th><th>Descripción</th><th style="width:52px">Und</th>' +
         '<th class="num" style="width:88px">Cantidad</th>' +
-        '<th class="num" style="width:112px">Precio costo</th>' +
+        '<th class="num" style="width:106px">Precio costo</th>' +
+        '<th style="width:168px">Proveedor</th>' +
         '<th style="width:44px;text-align:center" title="Importado">Imp.</th>' +
-        '<th class="num" style="width:108px">Vale</th>' +
+        '<th class="num" style="width:104px">Vale</th>' +
         '<th style="width:92px">Análisis</th>' +
       '</tr></thead><tbody>' +
         filas + '</tbody></table></div>' +
@@ -3443,6 +3795,14 @@ function enlazarInsumos(p) {
       el.onkeydown = function (e) { if (e.key === "Enter") { e.preventDefault(); el.blur(); } };
     });
   };
+  Array.prototype.forEach.call(document.querySelectorAll("[data-iprov]"), function (el) {
+    el.onchange = function () {
+      if (!p.proveedores) p.proveedores = {};
+      p.proveedores[el.dataset.iprov] = Number(el.value);
+      Store.guardar(p);
+      var y = window.scrollY; render(); window.scrollTo(0, y);
+    };
+  });
   editar("data-iprecio", function (it, el) { it.precio = Number(el.value) || 0; });
   editar("data-iimp", function (it, el) { it.imp = el.checked; });
 }
@@ -3502,7 +3862,8 @@ function vEntrega(p) {
           'El total de abajo no es definitivo.</div></div>' : "") +
       bloque +
       '<div class="btnrow" style="margin-top:17px">' +
-        '<button class="btn btnp" id="exp-todo">Descargar el archivo completo</button>' +
+        '<button class="btn btnp" id="exp-todo">Descargar en Excel</button>' +
+        '<button class="btn" id="exp-pdf">Ver para imprimir o guardar en PDF</button>' +
       '</div>' +
     '</div></div>' +
     '<div class="note"><div class="notet">Qué trae el archivo</div>' +
@@ -3516,6 +3877,148 @@ function enlazarEntrega(p) {
   });
   var e = document.getElementById("exp-todo");
   if (e) e.onclick = function () { exportarTodo(p); };
+  var pd = document.getElementById("exp-pdf");
+  if (pd) pd.onclick = function () { imprimirPropuesta(p); };
+}
+
+/* ------------------------------------------------------------------
+   Vista de impresión · el navegador la guarda como PDF
+   ------------------------------------------------------------------ */
+
+function imprimirPropuesta(p) {
+  var cat = Catalogo.leer();
+  if (!cat) { avisoError("Falta el catálogo de insumos."); return; }
+  var t = totalesProyecto(p, cat);
+  var sep = (p.forma || "junta") === "separada";
+  var mg = p.margenes || {};
+
+  var filaTot = function (k, v, fuerte) {
+    return '<tr' + (fuerte ? ' class="tot"' : "") + '><td class="k">' + esc(k) + '</td>' +
+      '<td class="v">' + cop(v) + '</td></tr>';
+  };
+
+  var resumen = sep
+    ? '<table class="res"><tbody>' +
+        '<tr class="sec"><td colspan="2">Materiales</td></tr>' +
+        filaTot("Subtotal", t.subMat) + filaTot("IVA " + (mg.iva || 0) + "%", t.ivaMat) +
+        filaTot("Total materiales", t.totalMat, true) +
+        '<tr class="sec"><td colspan="2">Mano de obra</td></tr>' +
+        filaTot("Subtotal", t.subMo) + filaTot("Administración " + (mg.admin || 0) + "%", t.moAdmin) +
+        filaTot("Imprevistos " + (mg.imprev || 0) + "%", t.moImprev) +
+        filaTot("Utilidad " + (mg.util || 0) + "%", t.moUtil) +
+        filaTot("IVA sobre la utilidad", t.moIva) + filaTot("Total mano de obra", t.totalMo, true) +
+        '<tr class="gran"><td class="k">Valor total de la propuesta</td><td class="v">' + cop(t.totalSep) + '</td></tr>' +
+      '</tbody></table>'
+    : '<table class="res"><tbody>' +
+        filaTot("Subtotal · costo directo", t.subtotal) +
+        filaTot("Administración " + (mg.admin || 0) + "%", t.admin) +
+        filaTot("Imprevistos " + (mg.imprev || 0) + "%", t.imprev) +
+        filaTot("Utilidad " + (mg.util || 0) + "%", t.util) +
+        filaTot("IVA " + (mg.iva || 0) + "% sobre la utilidad", t.iva) +
+        '<tr class="gran"><td class="k">Valor total de la propuesta</td><td class="v">' + cop(t.total) + '</td></tr>' +
+      '</tbody></table>';
+
+  var cot = "";
+  (p.hojas || []).forEach(function (h) {
+    if (!h.usar) return;
+    var cuerpo = "";
+    h.filas.forEach(function (f) {
+      if (f.tipo === "cap") {
+        cuerpo += '<tr class="cap"><td>' + esc(f.item) + '</td><td colspan="' + (sep ? 6 : 4) + '">' +
+          esc(f.desc) + '</td></tr>';
+        return;
+      }
+      var a = t.porApu[f.apu] || {};
+      var q = Number(f.cant) || 0;
+      cuerpo += '<tr><td class="c">' + esc(f.item) + '</td><td>' + esc(f.desc) + '</td>' +
+        '<td class="c">' + esc(f.und) + '</td><td class="n">' + fmt(q) + '</td>' +
+        (sep
+          ? '<td class="n">' + (a.matConTh ? cop(a.matConTh) : "—") + '</td>' +
+            '<td class="n">' + (a.mo ? cop(a.mo) : "—") + '</td>' +
+            '<td class="n">' + (a.unitario ? cop(a.unitario * q) : "—") + '</td>'
+          : '<td class="n">' + (a.unitario ? cop(a.unitario) : "—") + '</td>' +
+            '<td class="n">' + (a.unitario ? cop(a.unitario * q) : "—") + '</td>') +
+      '</tr>';
+    });
+    cot += '<h3>' + esc(h.nombre) + '</h3><table class="cot"><thead><tr>' +
+      '<th style="width:9%">Ítem</th><th>Descripción</th><th style="width:6%">Und</th>' +
+      '<th style="width:9%">Cant.</th>' +
+      (sep ? '<th style="width:12%">Material</th><th style="width:12%">Mano obra</th><th style="width:13%">Total</th>'
+           : '<th style="width:13%">Vr. unitario</th><th style="width:14%">Vr. total</th>') +
+      '</tr></thead><tbody>' + cuerpo + '</tbody></table>';
+  });
+
+  var ana = "";
+  analisisDe(p).forEach(function (a) {
+    var datos = (p.datosApu && p.datosApu[a.apu]) || {};
+    var comp = componerAnalisis(cat, datos, p, a.apu);
+    var val = valorizar(cat, comp.lineas, margenesDe(p, a.apu), p);
+    var fl = function (l) {
+      return '<tr><td class="n">' + dec(l.cantDesp) + '</td><td class="c">' + esc(l.cod) + '</td>' +
+        '<td>' + esc(l.desc) + '</td><td class="c">' + esc(l.und) + '</td>' +
+        '<td class="n">' + (l.desp ? l.desp + "%" : "") + '</td>' +
+        '<td class="n">' + (l.falta ? "—" : cop(l.precio)) + '</td>' +
+        '<td class="n">' + (l.falta ? "—" : cop(l.total)) + '</td></tr>';
+    };
+    ana += '<div class="apu"><div class="apuhd"><span class="apun">APU ' + a.apu + '</span>' +
+      '<span class="apui">' + a.items.map(function (x) { return esc(x.item); }).join(", ") + '</span>' +
+      '<span class="apud">' + esc(a.items[0] ? a.items[0].desc : "") + '</span></div>' +
+      '<table class="cot"><thead><tr><th style="width:10%">Cant.</th><th style="width:12%">Código</th>' +
+      '<th>Descripción</th><th style="width:6%">Und</th><th style="width:7%">Desp.</th>' +
+      '<th style="width:13%">Vr. unit</th><th style="width:14%">Vr. total</th></tr></thead><tbody>' +
+      '<tr class="cap"><td colspan="7">I · Materiales</td></tr>' +
+      val.lineas.filter(function (l) { return !l.mo; }).map(fl).join("") +
+      '<tr class="sub"><td colspan="6">Subtotal materiales</td><td class="n">' + cop(val.mat) + '</td></tr>' +
+      (val.th > 0
+        ? '<tr class="cap"><td colspan="7">II · Transporte y herramienta</td></tr>' +
+          '<tr><td></td><td class="c">TR1</td><td>Transportes</td><td></td><td class="n">' + dec(val.pctTrans) + '%</td>' +
+          '<td></td><td class="n">' + cop(val.transporte) + '</td></tr>' +
+          '<tr><td></td><td class="c">HER1</td><td>Herramienta de mano</td><td></td><td class="n">' + dec(val.pctHerr) + '%</td>' +
+          '<td></td><td class="n">' + cop(val.herramienta) + '</td></tr>'
+        : "") +
+      '<tr class="cap"><td colspan="7">III · Mano de obra</td></tr>' +
+      val.lineas.filter(function (l) { return l.mo; }).map(fl).join("") +
+      '<tr class="sub"><td colspan="6">Subtotal mano de obra</td><td class="n">' + cop(val.mo) + '</td></tr>' +
+      '<tr class="tot"><td colspan="6">Costo directo</td><td class="n">' + cop(val.directo) + '</td></tr>' +
+      '</tbody></table>' +
+      ((p.notasApu || {})[a.apu] ? '<p class="nota">' + esc(p.notasApu[a.apu]) + '</p>' : "") +
+      '</div>';
+  });
+
+  var cons = p.consideraciones
+    ? '<div class="cons"><h3>Consideraciones</h3>' +
+      String(p.consideraciones).split("\n").filter(function (l) { return l.trim(); })
+        .map(function (l) { return '<p>' + esc(l) + '</p>'; }).join("") + '</div>'
+    : "";
+
+  var w = window.open("", "_blank");
+  if (!w) { avisoError("El navegador bloqueó la ventana. Permite las ventanas emergentes de este sitio."); return; }
+  w.document.write('<!doctype html><html lang="es"><head><meta charset="utf-8">' +
+    '<title>' + esc(p.nombre || "Propuesta") + '</title>' +
+    '<link rel="stylesheet" href="print.css"></head><body>' +
+    '<div class="barra no-print"><button onclick="window.print()">Imprimir o guardar como PDF</button>' +
+      '<span>En el diálogo, elige “Guardar como PDF” en el destino.</span></div>' +
+    '<header class="mem">' +
+      '<img src="logo.png" alt="Lutec" class="lg">' +
+      '<div class="memtx"><div class="memmarca">LUTEC · Soluciones brillantes</div>' +
+      '<div class="memweb">www.lutec.com.co</div></div>' +
+      '<div class="memfec">' + fecha(hoy()) + '</div>' +
+    '</header>' +
+    '<h1>Propuesta económica</h1>' +
+    '<table class="datos"><tbody>' +
+      '<tr><td class="k">Proyecto</td><td>' + esc(p.nombre || "") + '</td>' +
+        '<td class="k">Cliente</td><td>' + esc(p.cliente || "") + '</td></tr>' +
+      '<tr><td class="k">Ciudad</td><td>' + esc(p.ciudad || "") + '</td>' +
+        '<td class="k">Entrega</td><td>' + fecha(p.entrega) + '</td></tr>' +
+      '<tr><td class="k">Ítems</td><td>' + (t.conValor + t.sinValor) + '</td>' +
+        '<td class="k">Análisis</td><td>' + t.analisis + '</td></tr>' +
+    '</tbody></table>' +
+    '<h2>Resumen</h2>' + resumen + cons +
+    '<div class="salto"></div><h2>Cotización</h2>' + cot +
+    '<div class="salto"></div><h2>Análisis de precios unitarios</h2>' + ana +
+    '<footer class="pie">Lutec · Soluciones brillantes · www.lutec.com.co</footer>' +
+    '</body></html>');
+  w.document.close();
 }
 
 /* ------------------------------------------------------------------
@@ -3632,7 +4135,7 @@ function exportarTodo(p) {
   analisisDe(p).forEach(function (a) {
     var datos = (p.datosApu && p.datosApu[a.apu]) || {};
     var comp = componerAnalisis(cat, datos, p, a.apu);
-    var val = valorizar(cat, comp.lineas, mg);
+    var val = valorizar(cat, comp.lineas, margenesDe(p, a.apu), p);
 
     an.push(["APU " + a.apu, a.items.map(function (x) { return x.item; }).join(", "),
              a.items[0] ? a.items[0].desc : "", a.items[0] ? a.items[0].und : ""]);
@@ -3669,7 +4172,7 @@ function exportarTodo(p) {
   /* ---- 4. Insumos ---- */
   var ins = [["CODIGO", "DESCRIPCION", "UND", "CANTIDAD", "DESP %", "PRECIO COSTO", "VR VENTA", "VALE", "ANALISIS"]];
   insumosDe(p, cat).forEach(function (i) {
-    var venta = precioAjustado({ precio: i.precio, imp: i.imp }, mg);
+    var venta = precioAjustado({ precio: i.precio, imp: i.imp, ofertas: i.ofertas, sel: i.sel, cod: i.cod }, mg, p);
     ins.push([i.cod, i.desc, i.und, i.cantidad, i.desp || 0, i.precio, venta,
               i.precio > 0 ? venta * i.cantidad : "", i.apus.join(", ")]);
   });
