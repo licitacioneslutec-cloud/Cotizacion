@@ -816,6 +816,187 @@ function componerCableado(cat, fila) {
   return { lineas: lineas, aviso: avisos.length ? avisos.join(" · ") : null };
 }
 
+/* ------------------------------------------------------------------
+   Salidas
+   ------------------------------------------------------------------ */
+
+var FAM_CUADRADA = "SALIDA CUADRADA O RECTANGULAR";
+var FAM_OCTOGONAL = "SALIDA CAJA OCTOGONAL";
+var FAM_HONDA = "SALIDA CAJA 10X10";
+
+/* Códigos de caja cuadrada que se retiran al cambiar de tipo de caja */
+var SWAP_METAL = ["418000033", "418000003"];
+var SWAP_PVC = ["181000167", "181000030"];
+/* Códigos que se quitan cuando la salida no lleva instalación */
+var COD_N_INS = ["266000485", "604000046", "266000558", "210000058", "210000060",
+                 "692000017", "266001635", "266001611", "720000039", "266000497"];
+
+var MODOS_SALIDA = [
+  { id: "completa", nombre: "Completa · incluye interruptor", fmo: 1 },
+  { id: "interruptor", nombre: "Interruptor separado", fmo: 0.75 },
+  { id: "iluminacion", nombre: "Iluminación separada", fmo: 0.35 },
+  { id: "normal", nombre: "Sin ajuste", fmo: 1 }
+];
+
+function multEstrato(e) {
+  var n = Number(e) || 2;
+  if (n < 2) n = 2;
+  if (n > 3) n = 3;              /* de 3 en adelante, el mismo multiplicador */
+  return 1 + (n - 2) * 0.1;
+}
+function multCable(prom) {
+  var n = Number(prom) || 0;
+  if (n < 5) return 1.0;
+  if (n <= 11) return 1.5;
+  return 2.0;
+}
+
+function filasSalida(cat) { return (cat && cat.comp && cat.comp.salidas) || []; }
+
+function opcionesSalida(cat) {
+  var d = filasSalida(cat);
+  var ap = {}, mat = {}, tub = {}, cal = {}, mc = {};
+  d.forEach(function (r) {
+    var f = txt(r["Familia"]);
+    if (f && limpia(f) !== FAM_CUADRADA && limpia(f) !== FAM_OCTOGONAL && limpia(f) !== FAM_HONDA) ap[f] = true;
+    var m = txt(r["Material"]); if (m) mat[m] = true;
+    var t = txt(r["calibre tubo"]); if (t) tub[t] = true;
+    var c = txt(r["calibre cable"]); if (c) cal[c] = true;
+    var x = txt(r["Mat. Cable"]); if (x) mc[x] = true;
+  });
+  var ord = function (o) { return Object.keys(o).sort(function (a, b) { return a.localeCompare(b, "es"); }); };
+  return { aparatos: ord(ap), materiales: ord(mat), tubos: ord(tub), calibres: ord(cal), matCable: ord(mc) };
+}
+
+function itemsFamilia(cat, familia, tubo, material) {
+  var fam = limpia(familia);
+  return filasSalida(cat).filter(function (r) {
+    if (limpia(r["Familia"]) !== fam) return false;
+    if (fam === FAM_CUADRADA) {
+      if (tubo && txt(r["calibre tubo"]) !== txt(tubo)) return false;
+      if (material && limpia(r["Material"]) !== limpia(material)) return false;
+    } else if (fam === FAM_OCTOGONAL || fam === FAM_HONDA) {
+      if (material && limpia(r["Material"]) !== limpia(material)) return false;
+    }
+    return true;
+  }).map(function (r) {
+    return {
+      cant: aNum(r["incidencia"]), cod: codClave(r["codigo"]),
+      desc: txt(r["descripcion"]), und: txt(r["unidad"])
+    };
+  });
+}
+
+/* Cambia la caja cuadrada por la octogonal o la 10x10 */
+function cambiarCaja(base, variante, material) {
+  var m = limpia(material);
+  var quitar = (m === "IMC" || m === "EMT") ? SWAP_METAL
+             : (m === "PVC" || m === "SCH40") ? SWAP_PVC : [];
+  var salen = {};
+  quitar.forEach(function (c) { salen[codClave(c)] = true; });
+  var res = variante.slice();
+  var yaHay = {};
+  variante.forEach(function (l) { yaHay[l.cod] = true; });
+  base.forEach(function (l) {
+    if (salen[l.cod] || yaHay[l.cod]) return;
+    res.push(l);
+  });
+  return res;
+}
+
+/* Compone una salida completa */
+function componerSalida(cat, fila) {
+  var avisos = [], lineas = [];
+  var aparato = txt(fila.aparato);
+  if (!aparato) return { lineas: [], avisos: [] };
+
+  var modo = fila.modo || "normal";
+  var infoModo = null;
+  MODOS_SALIDA.forEach(function (m) { if (m.id === modo) infoModo = m; });
+  var fmo = infoModo ? infoModo.fmo : 1;
+
+  var mEstrato = multEstrato(fila.estrato);
+  var prom = Number(fila.promedio) || 1;
+  var mCable = multCable(prom);
+
+  /* Las dos tuberías, cada una con su parte del recorrido */
+  var tubos = [
+    { mat: fila.mat1, cal: fila.tubo1, pct: Number(fila.pct1) },
+    { mat: fila.mat2, cal: fila.tubo2, pct: Number(fila.pct2) }
+  ].filter(function (t) { return t.mat && t.cal && t.pct > 0; });
+  if (!tubos.length && fila.mat1 && fila.tubo1) tubos = [{ mat: fila.mat1, cal: fila.tubo1, pct: 100 }];
+
+  var suma = tubos.reduce(function (t, x) { return t + x.pct; }, 0);
+  if (tubos.length > 1 && Math.abs(suma - 100) > 0.5) {
+    avisos.push("Las dos tuberías suman " + dec(suma) + "%, deberían dar 100");
+  }
+
+  tubos.forEach(function (t) {
+    var parte = t.pct / 100;
+    var base = itemsFamilia(cat, FAM_CUADRADA, t.cal, t.mat);
+    if (!base.length) { avisos.push("No hay salida cuadrada en " + limpia(t.mat) + " " + txt(t.cal)); return; }
+
+    var juego;
+    var caja = fila.caja || "cuadrada";
+    if (caja === "octogonal") {
+      juego = cambiarCaja(base, itemsFamilia(cat, FAM_OCTOGONAL, t.cal, t.mat), t.mat);
+    } else if (caja === "honda") {
+      juego = cambiarCaja(base, itemsFamilia(cat, FAM_HONDA, t.cal, t.mat), t.mat);
+    } else {
+      juego = base.slice();
+    }
+
+    /* Modo completo: se suma la caja octogonal y tres adaptadores */
+    if (modo === "completa") {
+      itemsFamilia(cat, FAM_OCTOGONAL, t.cal, t.mat).forEach(function (l) {
+        juego.push({ cant: l.cant, cod: l.cod, desc: l.desc, und: l.und });
+      });
+      var adap = null;
+      juego.forEach(function (l) { if (!adap && limpia(l.desc).indexOf("ADAPTADOR") >= 0) adap = l; });
+      if (adap) juego.push({ cant: 3, cod: adap.cod, desc: adap.desc, und: adap.und });
+      else avisos.push("No se encontró adaptador en " + limpia(t.mat) + " " + txt(t.cal) + " para sumarle tres");
+    }
+
+    if (fila.sinInstalacion) {
+      var fuera = {};
+      COD_N_INS.forEach(function (c) { fuera[codClave(c)] = true; });
+      juego = juego.filter(function (l) { return !fuera[l.cod]; });
+    }
+
+    juego.forEach(function (l) {
+      var c = l.cant * parte;
+      if (esManoObra(l.cod)) c *= mEstrato * fmo;
+      else if (limpia(l.desc).indexOf("TUBO") >= 0) c *= prom;
+      lineas.push({ cant: c, cod: l.cod, desc: l.desc, und: l.und });
+    });
+  });
+
+  /* Los ítems propios del aparato */
+  itemsFamilia(cat, aparato, null, null).forEach(function (l) {
+    var c = l.cant;
+    if (esManoObra(l.cod)) c *= mEstrato * fmo;
+    lineas.push({ cant: c, cod: l.cod, desc: l.desc, und: l.und });
+  });
+
+  /* El cable */
+  if (fila.calibreCable && fila.matCable) {
+    var mult = Number(fila.multCable) || 1;
+    var enc = filasSalida(cat).filter(function (r) {
+      return txt(r["calibre cable"]) === txt(fila.calibreCable) &&
+             limpia(r["Mat. Cable"]).indexOf(limpia(fila.matCable)) >= 0;
+    });
+    if (!enc.length) avisos.push("No hay cable " + txt(fila.calibreCable) + " " + txt(fila.matCable));
+    enc.forEach(function (r) {
+      var cod = codClave(r["codigo"]);
+      var inc = aNum(r["incidencia"]);
+      var c = esManoObra(cod) ? inc * mEstrato * mCable * fmo : inc * mult * prom;
+      lineas.push({ cant: c, cod: cod, desc: txt(r["descripcion"]), und: txt(r["unidad"]) });
+    });
+  }
+
+  return { lineas: lineas, avisos: avisos, fmo: fmo, mEstrato: mEstrato, mCable: mCable };
+}
+
 /* Compone todas las filas de un análisis */
 function componerAnalisis(cat, datos, p, apu) {
   var lineas = [], avisos = [], reglas = [], creados = [];
@@ -833,6 +1014,14 @@ function componerAnalisis(cat, datos, p, apu) {
     var r = componerEquipo(cat, fila, p, apu);
     if (r.aviso) { avisos.push("Equipo " + (i + 1) + ": " + r.aviso); return; }
     if (r.creado) creados.push(r.creado);
+    lineas = lineas.concat(r.lineas);
+  });
+
+  ((datos && datos.SA) || []).forEach(function (fila, i) {
+    var r = componerSalida(cat, fila);
+    (r.avisos || []).forEach(function (a) { avisos.push("Salida " + (i + 1) + ": " + a); });
+    if (r.fmo && r.fmo !== 1) reglas.push("Salida " + (i + 1) + ": la mano de obra va al " +
+      Math.round(r.fmo * 100) + "% por venir separada.");
     lineas = lineas.concat(r.lineas);
   });
 
@@ -898,7 +1087,7 @@ function precioAjustado(it, mg) {
   return v;
 }
 
-/* Le pone precio a cada línea y calcula subtotales */
+/* Le pone precio a cada línea y arma las tres secciones del análisis */
 function valorizar(cat, lineas, margenes) {
   var idx = Catalogo.indice(cat);
   var mg = margenes || {};
@@ -908,21 +1097,33 @@ function valorizar(cat, lineas, margenes) {
     var it = idx[l.cod] !== undefined ? cat.items[idx[l.cod]] : null;
     var base = it ? Number(it.precio) || 0 : 0;
     var precio = precioAjustado(it, mg);
-    var total = l.cant * precio;
+    var desp = it && Number(it.desp) > 0 ? Number(it.desp) : 0;
+    var cantDesp = l.cant * (1 + desp / 100);
+    var total = cantDesp * precio;
     if (precio <= 0) sinPrecio++;
-    if (esManoObra(l.cod)) mo += total; else mat += total;
+    var esMo = esManoObra(l.cod);
+    if (esMo) mo += total; else mat += total;
     return {
-      cant: l.cant, cod: l.cod, desc: l.desc || (it ? it.desc : ""),
+      cant: l.cant, cantDesp: cantDesp, desp: desp,
+      cod: l.cod, desc: l.desc || (it ? it.desc : ""),
       und: l.und || (it ? it.und : ""), base: base, precio: precio, total: total,
-      falta: precio <= 0, mo: esManoObra(l.cod), f075: l.f075,
+      falta: precio <= 0, mo: esMo, f075: l.f075, ajustada: l.ajustada, cantOrig: l.cantOrig,
       propio: l.propio, imp: it ? !!it.imp : false, enCatalogo: !!it
     };
   });
 
-  var directo = mat + mo;
+  var pctTrans = Number(mg.transporte) || 0;
+  var pctHerr = Number(mg.herramienta) || 0;
+  var transporte = mat * (pctTrans / 100);
+  var herramienta = mat * (pctHerr / 100);
+  var th = transporte + herramienta;
+  var directo = mat + th + mo;
+
   return {
-    lineas: conPrecio, mat: mat, mo: mo, directo: directo,
-    unitario: directo, sinPrecio: sinPrecio,
+    lineas: conPrecio,
+    mat: mat, transporte: transporte, herramienta: herramienta, th: th, mo: mo,
+    directo: directo, unitario: directo, sinPrecio: sinPrecio,
+    matConTh: mat + th,
     pesoMo: directo > 0 ? Math.round((mo / directo) * 100) : 0
   };
 }
@@ -936,6 +1137,7 @@ function valorizar(cat, lineas, margenes) {
 function totalesProyecto(p, cat) {
   var mg = p.margenes || {};
   var subtotal = 0, conValor = 0, sinValor = 0, faltantes = 0, analisis = 0;
+  var subMat = 0, subMo = 0;
   var porApu = {};
 
   if (cat && cat.comp) {
@@ -944,23 +1146,43 @@ function totalesProyecto(p, cat) {
       var datos = (p.datosApu && p.datosApu[a.apu]) || {};
       var comp = componerAnalisis(cat, datos, p, a.apu);
       var val = valorizar(cat, comp.lineas, mg);
-      porApu[a.apu] = { unitario: val.unitario, sinPrecio: val.sinPrecio, lineas: comp.lineas.length };
+      porApu[a.apu] = {
+        unitario: val.unitario, matConTh: val.matConTh, mo: val.mo,
+        sinPrecio: val.sinPrecio, lineas: comp.lineas.length
+      };
       faltantes += val.sinPrecio;
       a.items.forEach(function (it) {
-        if (val.unitario > 0) { subtotal += val.unitario * (Number(it.cant) || 0); conValor++; }
-        else sinValor++;
+        var q = Number(it.cant) || 0;
+        if (val.unitario > 0) {
+          subtotal += val.unitario * q;
+          subMat += val.matConTh * q;
+          subMo += val.mo * q;
+          conValor++;
+        } else sinValor++;
       });
     });
   }
 
-  var admin = subtotal * ((mg.admin || 0) / 100);
-  var imprev = subtotal * ((mg.imprev || 0) / 100);
-  var util = subtotal * ((mg.util || 0) / 100);
-  var iva = util * ((mg.iva || 0) / 100);
+  var pA = (mg.admin || 0) / 100, pI = (mg.imprev || 0) / 100;
+  var pU = (mg.util || 0) / 100, pV = (mg.iva || 0) / 100;
+
+  /* Forma junta: el AIU va sobre todo el subtotal */
+  var admin = subtotal * pA, imprev = subtotal * pI, util = subtotal * pU;
+  var iva = util * pV;
+
+  /* Forma separada: el material lleva IVA; la mano de obra lleva AIU y su IVA sobre la utilidad */
+  var ivaMat = subMat * pV;
+  var moAdmin = subMo * pA, moImprev = subMo * pI, moUtil = subMo * pU;
+  var moIva = moUtil * pV;
+  var totalMat = subMat + ivaMat;
+  var totalMo = subMo + moAdmin + moImprev + moUtil + moIva;
 
   return {
     subtotal: subtotal, admin: admin, imprev: imprev, util: util, iva: iva,
     total: subtotal + admin + imprev + util + iva,
+    subMat: subMat, ivaMat: ivaMat, totalMat: totalMat,
+    subMo: subMo, moAdmin: moAdmin, moImprev: moImprev, moUtil: moUtil, moIva: moIva, totalMo: totalMo,
+    totalSep: totalMat + totalMo,
     conValor: conValor, sinValor: sinValor, faltantes: faltantes,
     analisis: analisis, porApu: porApu
   };
@@ -1205,7 +1427,11 @@ function renderCatalogo() {
           '<th style="width:112px" class="num">Precio costo</th>' +
           '<th style="width:44px;text-align:center" title="Importado">Imp.</th>' +
           '<th style="width:104px">Proveedor</th><th style="width:88px">Actualizado</th>' +
-        '</tr></thead><tbody>' + filas + '</tbody></table></div>' +
+        '</tr></thead><tbody>' +
+        secc("I · Materiales", [filasMat]) +
+        (filasTh ? secc("II · Transporte y herramienta", [], filasTh) : "") +
+        secc("III · Mano de obra", [filasMo]) +
+      '</tbody></table></div>' +
         (lista.length > muestra.length
           ? '<div class="cbd" style="border-top:1px solid var(--line2);text-align:center">' +
             '<button class="btn" id="masfilas">Ver ' + Math.min(150, lista.length - muestra.length) +
@@ -1747,7 +1973,8 @@ function renderNuevo() {
       id: id(), nombre: b.nombre.trim(), cliente: b.cliente, ciudad: b.ciudad,
       recibo: b.recibo, entrega: b.entrega, archivo: b.archivo, hojas: b.hojas,
       consideraciones: "", costoDirecto: 0,
-      margenes: { rent: 10, dolar: 19, admin: 8, imprev: 2, util: 5, iva: 19 },
+      margenes: { rent: 10, dolar: 19, admin: 8, imprev: 2, util: 5, iva: 19, transporte: 1, herramienta: 2 },
+      forma: "junta",
       creado: new Date().toISOString()
     };
     Store.guardar(p);
@@ -2197,7 +2424,19 @@ function vApartados(p) {
 
   var act = apuActivo(p);
 
-  return '<div class="g g32">' +
+  var mg = p.margenes || {};
+  if (mg.transporte === undefined) mg.transporte = 1;
+  if (mg.herramienta === undefined) mg.herramienta = 2;
+
+  var barraPct = '<div class="card"><div class="cbd pctbar">' +
+    '<div><label class="lbl" for="pt">Transporte %</label>' +
+      '<input class="in m" type="number" min="0" max="100" step="0.5" id="pt" value="' + mg.transporte + '"></div>' +
+    '<div><label class="lbl" for="ph">Herramienta %</label>' +
+      '<input class="in m" type="number" min="0" max="100" step="0.5" id="ph" value="' + mg.herramienta + '"></div>' +
+    '<div class="pctnota">Se calculan sobre el subtotal de materiales de cada análisis y valen para todo el proyecto.</div>' +
+  '</div></div>';
+
+  return barraPct + '<div class="g g32">' +
       '<div class="card" style="margin:0"><div class="chd"><span class="ct">Análisis</span>' +
       '<span class="cn">' + lista.length + '</span></div>' +
       '<div class="alist" id="listaapu">' + listaApu(p, lista, act) + '</div></div>' +
@@ -2309,6 +2548,77 @@ function panelApu(p, cat, act) {
       '<span class="cn">' + filasEQ.length + (filasEQ.length === 1 ? " l\u00ednea" : " l\u00edneas") + '</span></div>' +
       '<div class="cbd">' + (bloquesEQ || '<p style="margin:0 0 12px;font-size:13px;color:var(--ink2)">Sin l\u00edneas todav\u00eda.</p>') +
       '<button class="btn" id="masEQ">+ Agregar equipo</button></div></div>';
+  }
+
+  /* --- formulario de salidas --- */
+  var filasSA = datos.SA || [];
+  var formSA = "";
+  if (act.cod.indexOf("SA") >= 0) {
+    var os = opcionesSalida(cat);
+    var bloquesSA = filasSA.map(function (fx, i) {
+      var g = fx;
+      var sel = function (campo, valor, opciones, ancho) {
+        return '<select class="in" data-sa="' + i + '|' + campo + '">' +
+          '<option value="">Elegir\u2026</option>' +
+          opciones.map(function (o) {
+            return '<option' + (txt(o) === txt(valor) ? " selected" : "") + '>' + esc(o) + '</option>';
+          }).join("") + '</select>';
+      };
+      var num = function (campo, valor, paso) {
+        return '<input class="in m" type="number" min="0" step="' + (paso || 1) + '" data-sa="' + i + '|' + campo +
+          '" value="' + (valor === undefined || valor === null ? "" : valor) + '">';
+      };
+      return '<div class="bloque">' +
+        '<div class="bloque-hd"><span class="bloque-n">Salida ' + (i + 1) + '</span>' +
+          '<button class="btnx" data-quitasa="' + i + '">Quitar</button></div>' +
+
+        '<div class="field"><label class="lbl">Aparato</label>' + sel("aparato", g.aparato, os.aparatos) + '</div>' +
+
+        '<div class="field"><label class="lbl">C\u00f3mo viene en el presupuesto</label>' +
+          '<select class="in" data-sa="' + i + '|modo">' +
+          MODOS_SALIDA.map(function (m) {
+            return '<option value="' + m.id + '"' + ((g.modo || "normal") === m.id ? " selected" : "") + '>' +
+              esc(m.nombre) + (m.fmo !== 1 ? "  \u00b7 mano de obra " + Math.round(m.fmo * 100) + "%" : "") +
+              '</option>';
+          }).join("") + '</select></div>' +
+
+        '<label class="lbl">Tuber\u00eda 1</label>' +
+        '<div class="g" style="grid-template-columns:1fr 1fr 78px;margin-bottom:8px">' +
+          '<div>' + sel("mat1", g.mat1, os.materiales) + '</div>' +
+          '<div>' + sel("tubo1", g.tubo1, os.tubos) + '</div>' +
+          '<div>' + num("pct1", g.pct1 === undefined ? 100 : g.pct1) + '</div>' +
+        '</div>' +
+        '<label class="lbl">Tuber\u00eda 2 <span style="text-transform:none;letter-spacing:0">(opcional)</span></label>' +
+        '<div class="g" style="grid-template-columns:1fr 1fr 78px;margin-bottom:10px">' +
+          '<div>' + sel("mat2", g.mat2, os.materiales) + '</div>' +
+          '<div>' + sel("tubo2", g.tubo2, os.tubos) + '</div>' +
+          '<div>' + num("pct2", g.pct2) + '</div>' +
+        '</div>' +
+
+        '<div class="g" style="grid-template-columns:1fr 1fr 1fr;margin-bottom:9px">' +
+          '<div><label class="lbl">Cable</label>' + sel("calibreCable", g.calibreCable, os.calibres) + '</div>' +
+          '<div><label class="lbl">Material cable</label>' + sel("matCable", g.matCable, os.matCable) + '</div>' +
+          '<div><label class="lbl">N.\u00ba de cables</label>' + num("multCable", g.multCable === undefined ? 1 : g.multCable) + '</div>' +
+        '</div>' +
+
+        '<div class="g" style="grid-template-columns:1fr 1fr 1fr">' +
+          '<div><label class="lbl">Estrato</label>' + num("estrato", g.estrato === undefined ? 2 : g.estrato) + '</div>' +
+          '<div><label class="lbl">Promedio</label>' + num("promedio", g.promedio === undefined ? 1 : g.promedio, "0.1") + '</div>' +
+          '<div><label class="lbl">Tipo de caja</label>' +
+            '<select class="in" data-sa="' + i + '|caja">' +
+            [["cuadrada", "Cuadrada"], ["octogonal", "Octogonal"], ["honda", "10x10"]].map(function (o) {
+              return '<option value="' + o[0] + '"' + ((g.caja || "cuadrada") === o[0] ? " selected" : "") + '>' + o[1] + '</option>';
+            }).join("") + '</select></div>' +
+        '</div>' +
+        '<label class="lbl" style="margin-top:9px"><input type="checkbox" data-sachk="' + i + '"' +
+          (g.sinInstalacion ? " checked" : "") + '> Sin materiales de instalaci\u00f3n</label>' +
+      '</div>';
+    }).join("");
+
+    formSA = '<div class="card"><div class="chd"><span class="ct">Salidas</span>' +
+      '<span class="cn">' + filasSA.length + (filasSA.length === 1 ? " salida" : " salidas") + '</span></div>' +
+      '<div class="cbd">' + (bloquesSA || '<p style="margin:0 0 12px;font-size:13px;color:var(--ink2)">Sin salidas todav\u00eda.</p>') +
+      '<button class="btn" id="masSA">+ Agregar salida</button></div></div>';
   }
 
   /* --- formulario de cableados --- */
@@ -2441,7 +2751,7 @@ function panelApu(p, cat, act) {
   }
 
   /* --- apartados aún no portados --- */
-  var listos = ["TU", "EQ", "TA", "CA", "mo"];
+  var listos = ["TU", "EQ", "TA", "CA", "SA", "mo"];
   var pendientes = act.cod.filter(function (c) { return listos.indexOf(c) < 0; });
   var avisoPend = pendientes.length
     ? '<div class="note"><div class="notet">Apartados en camino</div><div class="noteb">' +
@@ -2459,7 +2769,7 @@ function panelApu(p, cat, act) {
   var cuerpoComp;
 
   if (comp.lineas.length) {
-    var filas = val.lineas.map(function (l) {
+    var filaLinea = function (l) {
       var celPrecio;
       if (l.falta) {
         celPrecio = '<input class="in m inprecio" type="number" min="0" step="1" ' +
@@ -2478,8 +2788,8 @@ function panelApu(p, cat, act) {
         '<td>' + esc(l.desc) + '</td>' +
         '<td style="color:var(--ink3);font-size:12px">' + esc(l.und) + '</td>' +
         '<td style="text-align:center">' + (l.enCatalogo && !l.mo
-          ? '<input type="checkbox" data-imp="' + esc(l.cod) + '"' + (l.imp ? " checked" : "") +
-            ' title="Insumo importado: lleva el factor de dólar">' : "") + '</td>' +
+          ? '<input class="in m indesp" type="number" min="0" max="50" step="1" data-desp="' + esc(l.cod) +
+            '" value="' + (l.desp || "") + '" placeholder="0" title="Desperdicio %">' : "") + '</td>' +
         '<td class="num">' + celPrecio + '</td>' +
         '<td class="num">' + (l.falta ? "—" : cop(l.total)) + '</td>' +
         '<td style="text-align:center">' +
@@ -2487,15 +2797,37 @@ function panelApu(p, cat, act) {
                       : '<button class="btnx btnxdel" data-ajquita="' + esc(l.cod) + '" title="Quitar de este análisis">Quitar</button>') +
         '</td>' +
       '</tr>';
-    }).join("");
+    };
+
+    var secc = function (titulo, arr, extra) {
+      if (!arr.length && !extra) return "";
+      return '<tr class="seccrow"><td colspan="8">' + titulo + '</td></tr>' + arr.join("") + (extra || "");
+    };
+    var filasMat = val.lineas.filter(function (l) { return !l.mo; }).map(filaLinea).join("");
+    var filasMo = val.lineas.filter(function (l) { return l.mo; }).map(filaLinea).join("");
+    var filasTh =
+      (val.transporte > 0 || val.herramienta > 0
+        ? '<tr><td class="num"></td><td class="m" style="font-size:12px">TR1</td>' +
+          '<td>Transportes</td><td style="color:var(--ink3);font-size:12px"></td><td></td>' +
+          '<td class="num" style="color:var(--ink3);font-size:12px">' + dec(p.margenes.transporte || 0) + '%</td>' +
+          '<td class="num">' + cop(val.transporte) + '</td><td></td></tr>' +
+          '<tr><td class="num"></td><td class="m" style="font-size:12px">HER1</td>' +
+          '<td>Herramienta de mano</td><td style="color:var(--ink3);font-size:12px"></td><td></td>' +
+          '<td class="num" style="color:var(--ink3);font-size:12px">' + dec(p.margenes.herramienta || 0) + '%</td>' +
+          '<td class="num">' + cop(val.herramienta) + '</td><td></td></tr>'
+        : "");
 
     cuerpoComp = '<div class="scroll"><table class="tbl"><thead><tr>' +
         '<th class="num" style="width:78px">Cant.</th><th style="width:104px">Código</th>' +
         '<th>Descripción</th><th style="width:52px">Und</th>' +
-        '<th style="width:44px;text-align:center" title="Importado">Imp.</th>' +
+        '<th style="width:52px;text-align:center" title="Desperdicio">Desp.</th>' +
         '<th class="num" style="width:100px">Vr. venta</th><th class="num" style="width:94px">Vr. total</th>' +
         '<th style="width:56px"><span class="sr">Acciones</span></th>' +
-      '</tr></thead><tbody>' + filas + '</tbody></table></div>' +
+      '</tr></thead><tbody>' +
+        secc("I · Materiales", [filasMat]) +
+        (filasTh ? secc("II · Transporte y herramienta", [], filasTh) : "") +
+        secc("III · Mano de obra", [filasMo]) +
+      '</tbody></table></div>' +
       '<div class="cbd" style="border-top:1px solid var(--line2)">' +
         (comp.quitadas ? '<div class="note" style="margin:0 0 13px"><div class="notet">Líneas quitadas</div>' +
           '<div class="noteb">Se quitaron ' + comp.quitadas + ' insumos de este análisis. ' +
@@ -2506,8 +2838,10 @@ function panelApu(p, cat, act) {
           ' en el catálogo. El total de abajo está incompleto.</div>' : "") +
         '<div class="dl">' +
           '<div class="dlr"><span class="dlk">Subtotal materiales</span><span class="dlv m">' + cop(val.mat) + '</span></div>' +
+          (val.th > 0 ? '<div class="dlr"><span class="dlk">Transporte y herramienta</span>' +
+            '<span class="dlv m">' + cop(val.th) + '</span></div>' : "") +
           '<div class="dlr"><span class="dlk">Subtotal mano de obra</span><span class="dlv m">' + cop(val.mo) + '</span></div>' +
-          '<div class="dlr dltot"><span class="dlk">Valor unitario</span>' +
+          '<div class="dlr dltot"><span class="dlk">Costo directo</span>' +
             '<span class="dlv m">' + cop(val.unitario) + '</span></div>' +
         '</div>' +
         '<div class="aporte">' + act.items.map(function (x) {
@@ -2521,7 +2855,7 @@ function panelApu(p, cat, act) {
         (val.directo > 0 ? '<div class="ok" style="margin-top:13px">La mano de obra pesa ' +
           val.pesoMo + '% del costo directo.</div>' : "") +
       '</div>';
-  } else if (!filasTU.length && !filasEQ.length && !filasTA.length && !filasMO.length && !filasCA.length) {
+  } else if (!filasTU.length && !filasEQ.length && !filasTA.length && !filasMO.length && !filasCA.length && !filasSA.length) {
     cuerpoComp = '<div class="empty">Agrega una línea arriba y la composición aparece aquí.</div>';
   } else {
     var faltan = [];
@@ -2558,7 +2892,7 @@ function panelApu(p, cat, act) {
         '<div class="m" style="font-size:11px;color:var(--ink3);margin-top:7px">' +
         act.items.map(function (x) { return fmt(x.cant) + " " + esc(x.und); }).join("  ·  ") + '</div>' +
       '</div></div>' +
-    avisoPend + formCA + formTU + formEQ + formTA + formMO + reglas + avisos + tabla +
+    avisoPend + formSA + formCA + formTU + formEQ + formTA + formMO + reglas + avisos + tabla +
     '<div class="card"><div class="chd"><span class="ct">Consideraciones del análisis</span></div>' +
       '<div class="cbd"><textarea class="in" id="notaapu" ' +
       'placeholder="Por qué se armó así, qué se asumió, qué quedó por fuera.">' + esc(nota) + '</textarea></div></div>';
@@ -2698,6 +3032,71 @@ function enlazarPanel(p) {
     if (el.tagName === "INPUT") el.onkeydown = function (e) {
       if (e.key === "Enter") { e.preventDefault(); el.blur(); }
     };
+  });
+
+  /* --- salidas --- */
+  var masS = document.getElementById("masSA");
+  if (masS) masS.onclick = function () {
+    var d = datosDe(p, act.apu);
+    if (!d.SA) d.SA = [];
+    d.SA.push({ aparato: "", modo: "normal", mat1: "", tubo1: "", pct1: 100,
+                mat2: "", tubo2: "", pct2: "", calibreCable: "", matCable: "",
+                multCable: 1, estrato: 2, promedio: 1, caja: "cuadrada", sinInstalacion: false });
+    Store.guardar(p); refrescarPanel(p);
+  };
+  Array.prototype.forEach.call(document.querySelectorAll("[data-quitasa]"), function (b) {
+    b.onclick = function () {
+      var d = datosDe(p, act.apu);
+      d.SA.splice(Number(b.dataset.quitasa), 1);
+      Store.guardar(p); refrescarPanel(p);
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-sachk]"), function (c) {
+    c.onchange = function () {
+      var d = datosDe(p, act.apu);
+      var f = d.SA[Number(c.dataset.sachk)];
+      if (!f) return;
+      f.sinInstalacion = c.checked;
+      Store.guardar(p); refrescarPanel(p);
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-sa]"), function (el) {
+    var q = el.dataset.sa.split("|"), campo = q[1];
+    var numericos = ["pct1", "pct2", "multCable", "estrato", "promedio"];
+    el.onchange = function () {
+      var d = datosDe(p, act.apu);
+      var f = d.SA && d.SA[Number(q[0])];
+      if (!f) return;
+      f[campo] = numericos.indexOf(campo) >= 0 ? (el.value === "" ? "" : Number(el.value) || 0) : el.value;
+      Store.guardar(p); refrescarPanel(p);
+    };
+    if (el.tagName === "INPUT") el.onkeydown = function (e) {
+      if (e.key === "Enter") { e.preventDefault(); el.blur(); }
+    };
+  });
+
+  /* --- porcentajes de transporte y herramienta --- */
+  ["pt", "ph"].forEach(function (idc) {
+    var el = document.getElementById(idc);
+    if (!el) return;
+    el.onchange = function () {
+      p.margenes[idc === "pt" ? "transporte" : "herramienta"] = Number(el.value) || 0;
+      Store.guardar(p); refrescarPanel(p);
+    };
+    el.onkeydown = function (e) { if (e.key === "Enter") { e.preventDefault(); el.blur(); } };
+  });
+
+  /* --- desperdicio por insumo --- */
+  Array.prototype.forEach.call(document.querySelectorAll("[data-desp]"), function (el) {
+    el.onchange = function () {
+      var c = Catalogo.leer();
+      var ix = Catalogo.indice(c);
+      var i = ix[el.dataset.desp];
+      if (i === undefined) return;
+      c.items[i].desp = Number(el.value) || 0;
+      Catalogo.guardar(c); refrescarPanel(p);
+    };
+    el.onkeydown = function (e) { if (e.key === "Enter") { e.preventDefault(); el.blur(); } };
   });
 
   /* --- cableados --- */
@@ -2934,6 +3333,7 @@ function insumosDe(p, cat) {
     u.und = u.und || (it ? it.und : "");
     u.precio = it ? Number(it.precio) || 0 : 0;
     u.imp = it ? !!it.imp : false;
+    u.desp = it ? Number(it.desp) || 0 : 0;
     u.enCat = !!it;
     u.mo = esManoObra(c);
     return u;
@@ -3009,7 +3409,11 @@ function vInsumos(p) {
         '<th style="width:44px;text-align:center" title="Importado">Imp.</th>' +
         '<th class="num" style="width:108px">Vale</th>' +
         '<th style="width:92px">Análisis</th>' +
-      '</tr></thead><tbody>' + filas + '</tbody></table></div>' +
+      '</tr></thead><tbody>' +
+        secc("I · Materiales", [filasMat]) +
+        (filasTh ? secc("II · Transporte y herramienta", [], filasTh) : "") +
+        secc("III · Mano de obra", [filasMo]) +
+      '</tbody></table></div>' +
     '</div>' +
 
     '<div class="note"><div class="notet">Qué muestra la cantidad</div>' +
@@ -3054,7 +3458,47 @@ function enlazarInsumos(p) {
 function vEntrega(p) {
   var cat = Catalogo.leer();
   var t = totalesProyecto(p, cat);
-  return '<div class="card"><div class="chd"><span class="ct">Resumen de la oferta</span>' +
+  var forma = p.forma || "junta";
+
+  var bloque = forma === "junta"
+    ? '<div class="dl">' +
+        '<div class="dlr"><span class="dlk">Subtotal · costo directo</span><span class="dlv m">' + cop(t.subtotal) + '</span></div>' +
+        '<div class="dlr"><span class="dlk">Administración</span><span class="dlv m">' + cop(t.admin) + '</span></div>' +
+        '<div class="dlr"><span class="dlk">Imprevistos</span><span class="dlv m">' + cop(t.imprev) + '</span></div>' +
+        '<div class="dlr"><span class="dlk">Utilidad</span><span class="dlv m">' + cop(t.util) + '</span></div>' +
+        '<div class="dlr"><span class="dlk">IVA sobre utilidad</span><span class="dlv m">' + cop(t.iva) + '</span></div>' +
+        '<div class="dlr dltot"><span class="dlk">Valor total</span><span class="dlv m">' + cop(t.total) + '</span></div>' +
+      '</div>'
+    : '<div class="g g2">' +
+        '<div><div class="subt">Materiales</div><div class="dl">' +
+          '<div class="dlr"><span class="dlk">Subtotal</span><span class="dlv m">' + cop(t.subMat) + '</span></div>' +
+          '<div class="dlr"><span class="dlk">IVA ' + (p.margenes.iva || 0) + '%</span><span class="dlv m">' + cop(t.ivaMat) + '</span></div>' +
+          '<div class="dlr dltot"><span class="dlk">Total materiales</span><span class="dlv m">' + cop(t.totalMat) + '</span></div>' +
+        '</div></div>' +
+        '<div><div class="subt">Mano de obra</div><div class="dl">' +
+          '<div class="dlr"><span class="dlk">Subtotal</span><span class="dlv m">' + cop(t.subMo) + '</span></div>' +
+          '<div class="dlr"><span class="dlk">Administración</span><span class="dlv m">' + cop(t.moAdmin) + '</span></div>' +
+          '<div class="dlr"><span class="dlk">Imprevistos</span><span class="dlv m">' + cop(t.moImprev) + '</span></div>' +
+          '<div class="dlr"><span class="dlk">Utilidad</span><span class="dlv m">' + cop(t.moUtil) + '</span></div>' +
+          '<div class="dlr"><span class="dlk">IVA sobre utilidad</span><span class="dlv m">' + cop(t.moIva) + '</span></div>' +
+          '<div class="dlr dltot"><span class="dlk">Total mano de obra</span><span class="dlv m">' + cop(t.totalMo) + '</span></div>' +
+        '</div></div>' +
+      '</div>' +
+      '<div class="dl" style="margin-top:14px"><div class="dlr dltot">' +
+        '<span class="dlk">Valor total</span><span class="dlv m">' + cop(t.totalSep) + '</span></div></div>';
+
+  return '<div class="card"><div class="chd"><span class="ct">Forma de presentar</span></div><div class="cbd">' +
+      '<div class="tabs">' +
+        '<button class="tab" data-forma="junta" aria-pressed="' + (forma === "junta") + '">Precio junto</button>' +
+        '<button class="tab" data-forma="separada" aria-pressed="' + (forma === "separada") + '">Material y mano de obra aparte</button>' +
+      '</div>' +
+      '<p style="margin:12px 0 0;font-size:12.5px;color:var(--ink2)">' +
+        (forma === "junta"
+          ? "Un solo precio por ítem, con el AIU y el IVA sobre la utilidad al final."
+          : "El material lleva IVA; la mano de obra lleva AIU con su IVA sobre la utilidad. El cliente ve las dos columnas.") +
+      '</p></div></div>' +
+
+    '<div class="card"><div class="chd"><span class="ct">Valor de la oferta</span>' +
       '<span class="cn">' + t.conValor + ' de ' + (t.conValor + t.sinValor) + ' ítems con valor</span></div>' +
       '<div class="cbd">' +
       (t.sinValor || t.faltantes
@@ -3062,52 +3506,185 @@ function vEntrega(p) {
           '<div class="noteb">' + (t.sinValor ? t.sinValor + ' ítems sin valor. ' : "") +
           (t.faltantes ? t.faltantes + ' insumos sin precio. ' : "") +
           'El total de abajo no es definitivo.</div></div>' : "") +
-      '<div class="dl">' +
-        '<div class="dlr"><span class="dlk">Subtotal · costo directo</span><span class="dlv m">' + cop(t.subtotal) + '</span></div>' +
-        '<div class="dlr"><span class="dlk">Administración</span><span class="dlv m">' + cop(t.admin) + '</span></div>' +
-        '<div class="dlr"><span class="dlk">Imprevistos</span><span class="dlv m">' + cop(t.imprev) + '</span></div>' +
-        '<div class="dlr"><span class="dlk">Utilidad</span><span class="dlv m">' + cop(t.util) + '</span></div>' +
-        '<div class="dlr"><span class="dlk">IVA sobre utilidad</span><span class="dlv m">' + cop(t.iva) + '</span></div>' +
-        '<div class="dlr dltot"><span class="dlk">Valor total</span><span class="dlv m">' + cop(t.total) + '</span></div>' +
-      '</div>' +
+      bloque +
       '<div class="btnrow" style="margin-top:17px">' +
-        '<button class="btn btnp" id="exp-armado">Descargar cotización valorizada</button>' +
+        '<button class="btn btnp" id="exp-todo">Descargar el archivo completo</button>' +
       '</div>' +
     '</div></div>' +
-    '<div class="note"><div class="notet">Alcance de esta versión</div>' +
-    '<div class="noteb">El Excel trae el anexo del cliente con su reparto de apartados, su número de análisis ' +
-    'y el valor unitario de los que ya están armados. La hoja de análisis detallada y la carta llegan cuando ' +
-    'estén los seis apartados.</div></div>';
+    '<div class="note"><div class="notet">Qué trae el archivo</div>' +
+    '<div class="noteb">Cuatro hojas: membrete con los datos y el resumen, cotización con el anexo valorizado, ' +
+    'análisis con los insumos de cada APU en sus tres secciones, e insumos con lo que se necesita comprar.</div></div>';
 }
 
 function enlazarEntrega(p) {
-  document.getElementById("exp-armado").onclick = function () {
-    var cat = Catalogo.leer();
-    var t = totalesProyecto(p, cat);
-    var datos = [["HOJA", "CODIGO", "APU", "ITEM", "DESCRIPCION", "UND", "CANTIDAD",
-                  "VR UNITARIO", "VR TOTAL", "CONSIDERACIONES"]];
-    (p.hojas || []).forEach(function (h) {
-      if (!h.usar) return;
-      h.filas.forEach(function (f) {
-        if (f.tipo !== "it") return;
-        var u = (t.porApu[f.apu] && t.porApu[f.apu].unitario) || 0;
-        datos.push([h.nombre, f.cod.join(" "), f.apu || "", f.item, f.desc, f.und, f.cant,
-          u || "", u ? u * (Number(f.cant) || 0) : "", (p.notasApu || {})[f.apu] || ""]);
-      });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-forma]"), function (b) {
+    b.onclick = function () { p.forma = b.dataset.forma; Store.guardar(p); render(); };
+  });
+  var e = document.getElementById("exp-todo");
+  if (e) e.onclick = function () { exportarTodo(p); };
+}
+
+/* ------------------------------------------------------------------
+   Archivo de entrega
+   ------------------------------------------------------------------ */
+
+function exportarTodo(p) {
+  var cat = Catalogo.leer();
+  if (!cat) { avisoError("Falta el catálogo de insumos."); return; }
+  var t = totalesProyecto(p, cat);
+  var sep = (p.forma || "junta") === "separada";
+  var mg = p.margenes || {};
+  var wb = XLSX.utils.book_new();
+
+  /* ---- 1. Membrete ---- */
+  var mem = [
+    ["LUTEC · SOLUCIONES BRILLANTES"],
+    ["www.lutec.com.co"],
+    [],
+    ["PROPUESTA ECONÓMICA"],
+    [],
+    ["Proyecto", p.nombre || ""],
+    ["Cliente", p.cliente || ""],
+    ["Ciudad", p.ciudad || ""],
+    ["Recibo del anexo", fecha(p.recibo)],
+    ["Entrega de la oferta", fecha(p.entrega)],
+    ["Ítems del anexo", t.conValor + t.sinValor],
+    ["Análisis de precios", t.analisis],
+    []
+  ];
+  if (sep) {
+    mem.push(["RESUMEN · MATERIALES Y MANO DE OBRA SEPARADOS"]);
+    mem.push([]);
+    mem.push(["MATERIALES", ""]);
+    mem.push(["Subtotal materiales", t.subMat]);
+    mem.push(["IVA " + (mg.iva || 0) + "%", t.ivaMat]);
+    mem.push(["Total materiales", t.totalMat]);
+    mem.push([]);
+    mem.push(["MANO DE OBRA", ""]);
+    mem.push(["Subtotal mano de obra", t.subMo]);
+    mem.push(["Administración " + (mg.admin || 0) + "%", t.moAdmin]);
+    mem.push(["Imprevistos " + (mg.imprev || 0) + "%", t.moImprev]);
+    mem.push(["Utilidad " + (mg.util || 0) + "%", t.moUtil]);
+    mem.push(["IVA " + (mg.iva || 0) + "% sobre la utilidad", t.moIva]);
+    mem.push(["Total mano de obra", t.totalMo]);
+    mem.push([]);
+    mem.push(["VALOR TOTAL DE LA PROPUESTA", t.totalSep]);
+  } else {
+    mem.push(["RESUMEN"]);
+    mem.push([]);
+    mem.push(["Subtotal · costo directo", t.subtotal]);
+    mem.push(["Administración " + (mg.admin || 0) + "%", t.admin]);
+    mem.push(["Imprevistos " + (mg.imprev || 0) + "%", t.imprev]);
+    mem.push(["Utilidad " + (mg.util || 0) + "%", t.util]);
+    mem.push(["IVA " + (mg.iva || 0) + "% sobre la utilidad", t.iva]);
+    mem.push([]);
+    mem.push(["VALOR TOTAL DE LA PROPUESTA", t.total]);
+  }
+  if (p.consideraciones) {
+    mem.push([]);
+    mem.push(["CONSIDERACIONES"]);
+    String(p.consideraciones).split("\n").forEach(function (l) { if (l.trim()) mem.push([l]); });
+  }
+  var wsM = XLSX.utils.aoa_to_sheet(mem);
+  wsM["!cols"] = [{ wch: 42 }, { wch: 20 }];
+  XLSX.utils.book_append_sheet(wb, wsM, "MEMBRETE");
+
+  /* ---- 2. Cotización ---- */
+  var enc = sep
+    ? ["ITEM", "DESCRIPCION", "UND", "CANT", "APU", "VR MATERIAL", "VR MANO OBRA", "TOTAL MATERIAL", "TOTAL MANO OBRA"]
+    : ["ITEM", "DESCRIPCION", "UND", "CANT", "APU", "VR UNITARIO", "VR TOTAL"];
+  var cot = [enc];
+  (p.hojas || []).forEach(function (h) {
+    if (!h.usar) return;
+    cot.push([]);
+    cot.push([h.nombre]);
+    h.filas.forEach(function (f) {
+      if (f.tipo === "cap") { cot.push([f.item, f.desc]); return; }
+      var a = t.porApu[f.apu] || {};
+      var q = Number(f.cant) || 0;
+      if (sep) {
+        cot.push([f.item, f.desc, f.und, q, f.apu || "",
+          a.matConTh || "", a.mo || "",
+          a.matConTh ? a.matConTh * q : "", a.mo ? a.mo * q : ""]);
+      } else {
+        cot.push([f.item, f.desc, f.und, q, f.apu || "",
+          a.unitario || "", a.unitario ? a.unitario * q : ""]);
+      }
     });
-    datos.push([]);
-    datos.push(["", "", "", "", "SUBTOTAL", "", "", "", t.subtotal, ""]);
-    datos.push(["", "", "", "", "ADMINISTRACION", "", "", "", t.admin, ""]);
-    datos.push(["", "", "", "", "IMPREVISTOS", "", "", "", t.imprev, ""]);
-    datos.push(["", "", "", "", "UTILIDAD", "", "", "", t.util, ""]);
-    datos.push(["", "", "", "", "IVA SOBRE UTILIDAD", "", "", "", t.iva, ""]);
-    datos.push(["", "", "", "", "VALOR TOTAL", "", "", "", t.total, ""]);
-    var ws = XLSX.utils.aoa_to_sheet(datos);
-    ws["!cols"] = [{ wch: 22 }, { wch: 10 }, { wch: 6 }, { wch: 10 }, { wch: 58 }, { wch: 6 }, { wch: 11 }, { wch: 14 }, { wch: 16 }, { wch: 38 }];
-    var wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "COTIZACION");
-    XLSX.writeFile(wb, p.nombre.replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "_") + "_cotizacion.xlsx");
-  };
+  });
+  cot.push([]);
+  if (sep) {
+    cot.push(["", "SUBTOTAL MATERIALES", "", "", "", "", "", t.subMat, ""]);
+    cot.push(["", "SUBTOTAL MANO DE OBRA", "", "", "", "", "", "", t.subMo]);
+    cot.push(["", "IVA MATERIALES", "", "", "", "", "", t.ivaMat, ""]);
+    cot.push(["", "AIU MANO DE OBRA", "", "", "", "", "", "", t.moAdmin + t.moImprev + t.moUtil]);
+    cot.push(["", "IVA SOBRE UTILIDAD", "", "", "", "", "", "", t.moIva]);
+    cot.push(["", "VALOR TOTAL", "", "", "", "", "", t.totalMat, t.totalMo]);
+  } else {
+    cot.push(["", "SUBTOTAL", "", "", "", "", t.subtotal]);
+    cot.push(["", "ADMINISTRACION", "", "", "", "", t.admin]);
+    cot.push(["", "IMPREVISTOS", "", "", "", "", t.imprev]);
+    cot.push(["", "UTILIDAD", "", "", "", "", t.util]);
+    cot.push(["", "IVA SOBRE UTILIDAD", "", "", "", "", t.iva]);
+    cot.push(["", "VALOR TOTAL", "", "", "", "", t.total]);
+  }
+  var wsC = XLSX.utils.aoa_to_sheet(cot);
+  wsC["!cols"] = [{ wch: 11 }, { wch: 62 }, { wch: 7 }, { wch: 11 }, { wch: 7 },
+                  { wch: 15 }, { wch: 15 }, { wch: 16 }, { wch: 16 }];
+  XLSX.utils.book_append_sheet(wb, wsC, "COTIZACION");
+
+  /* ---- 3. Análisis ---- */
+  var an = [];
+  analisisDe(p).forEach(function (a) {
+    var datos = (p.datosApu && p.datosApu[a.apu]) || {};
+    var comp = componerAnalisis(cat, datos, p, a.apu);
+    var val = valorizar(cat, comp.lineas, mg);
+
+    an.push(["APU " + a.apu, a.items.map(function (x) { return x.item; }).join(", "),
+             a.items[0] ? a.items[0].desc : "", a.items[0] ? a.items[0].und : ""]);
+    an.push(["CANT", "CODIGO", "DESCRIPCION", "UND", "DESP %", "VR UNIT", "VR TOTAL"]);
+
+    an.push(["", "", "I. MATERIALES"]);
+    val.lineas.filter(function (l) { return !l.mo; }).forEach(function (l) {
+      an.push([l.cant, l.cod, l.desc, l.und, l.desp || 0, l.precio, l.total]);
+    });
+    an.push(["", "", "SUBTOTAL MATERIALES", "", "", "", val.mat]);
+
+    if (val.th > 0) {
+      an.push(["", "", "II. TRANSPORTE Y HERRAMIENTA"]);
+      an.push(["", "TR1", "Transportes", "", (mg.transporte || 0) + "%", "", val.transporte]);
+      an.push(["", "HER1", "Herramienta de mano", "", (mg.herramienta || 0) + "%", "", val.herramienta]);
+      an.push(["", "", "SUBTOTAL TRANSPORTE Y HERRAMIENTA", "", "", "", val.th]);
+    }
+
+    an.push(["", "", "III. MANO DE OBRA"]);
+    val.lineas.filter(function (l) { return l.mo; }).forEach(function (l) {
+      an.push([l.cant, l.cod, l.desc, l.und, "", l.precio, l.total]);
+    });
+    an.push(["", "", "SUBTOTAL MANO DE OBRA", "", "", "", val.mo]);
+    an.push(["", "", "COSTO DIRECTO", "", "", "", val.directo]);
+
+    var nota = (p.notasApu || {})[a.apu];
+    if (nota) an.push(["", "", "Consideraciones: " + nota]);
+    an.push([]);
+  });
+  var wsA = XLSX.utils.aoa_to_sheet(an);
+  wsA["!cols"] = [{ wch: 11 }, { wch: 13 }, { wch: 58 }, { wch: 8 }, { wch: 8 }, { wch: 14 }, { wch: 15 }];
+  XLSX.utils.book_append_sheet(wb, wsA, "ANALISIS");
+
+  /* ---- 4. Insumos ---- */
+  var ins = [["CODIGO", "DESCRIPCION", "UND", "CANTIDAD", "DESP %", "PRECIO COSTO", "VR VENTA", "VALE", "ANALISIS"]];
+  insumosDe(p, cat).forEach(function (i) {
+    var venta = precioAjustado({ precio: i.precio, imp: i.imp }, mg);
+    ins.push([i.cod, i.desc, i.und, i.cantidad, i.desp || 0, i.precio, venta,
+              i.precio > 0 ? venta * i.cantidad : "", i.apus.join(", ")]);
+  });
+  var wsI = XLSX.utils.aoa_to_sheet(ins);
+  wsI["!cols"] = [{ wch: 13 }, { wch: 58 }, { wch: 8 }, { wch: 13 }, { wch: 8 },
+                  { wch: 14 }, { wch: 14 }, { wch: 15 }, { wch: 20 }];
+  XLSX.utils.book_append_sheet(wb, wsI, "INSUMOS");
+
+  XLSX.writeFile(wb, (p.nombre || "propuesta").replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "_") + ".xlsx");
 }
 
 /* ------------------------------------------------------------------ */

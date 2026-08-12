@@ -260,3 +260,16 @@ tr[data-aj] td:first-child{box-shadow:inset 3px 0 0 var(--lime);}
 .empty .dropt{margin-bottom:6px;}
 
 @media(prefers-reduced-motion:reduce){*{transition:none !important;}}
+
+/* ---- porcentajes generales de apartados ---- */
+.pctbar{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;}
+.pctbar>div:first-child,.pctbar>div:nth-child(2){width:118px;}
+.pctnota{flex:1;min-width:200px;font-size:12px;color:var(--ink3);padding-bottom:7px;}
+
+/* ---- secciones del análisis ---- */
+.seccrow td{background:var(--paper);font-family:'Barlow Condensed',sans-serif;font-size:11px;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--ink2);padding:7px 8px;font-weight:600;
+  border-bottom:1px solid var(--line);}
+.indesp{width:46px;padding:3px 5px;font-size:11px;text-align:center;}
+.subt{font-family:'Barlow Condensed',sans-serif;font-weight:600;font-size:13px;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--navy);margin-bottom:8px;}
