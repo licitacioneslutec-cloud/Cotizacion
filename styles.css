@@ -178,6 +178,17 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;}
 .protfila{margin-bottom:7px;align-items:center;}
 .btnmini{padding:5px 11px;font-size:12px;}
 
+/* ---- cableados ---- */
+.cafila{margin-bottom:7px;align-items:center;}
+.carol{font-family:'Barlow Condensed',sans-serif;font-size:12px;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--ink3);padding-top:8px;}
+
+/* ---- ajustes por línea ---- */
+.incant{width:74px;padding:4px 6px;font-size:12px;text-align:right;}
+.incant.tocada{border-color:var(--limedk);background:#F7FAF1;font-weight:500;}
+.ajmarca{color:var(--limedk);font-weight:600;}
+tr[data-aj] td:first-child{box-shadow:inset 3px 0 0 var(--lime);}
+
 /* ---- fichas y botones ---- */
 .chip{display:inline-block;font-family:'IBM Plex Mono',monospace;font-size:11px;padding:2px 7px;border-radius:3px;
   background:#EAF2FA;color:#22506E;border:1px solid #CFE0EE;margin-right:4px;}

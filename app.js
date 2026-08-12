@@ -698,6 +698,124 @@ function componerTablero(cat, fila) {
   return { lineas: lineas, aviso: avisos.length ? avisos.join(" · ") : null };
 }
 
+/* ------------------------------------------------------------------
+   Cableados
+   Los 100 cables del catálogo se eligen de una lista, así que no hay
+   que descifrar textos como "1/0 THHN CU": el cable ya viene con su
+   código, su descripción y su rendimiento de mano de obra.
+   ------------------------------------------------------------------ */
+
+/* Calibre de una descripción, para emparejar cable con borna */
+function calibreDe(texto) {
+  var t = limpia(texto);
+  var m = t.match(/(\d+)\s*MM2/);        if (m) return m[1];
+  m = t.match(/(\d+)\s*\/\s*0/);          if (m) return m[1] + "/0";
+  m = t.match(/(\d+)\s*MCM/);             if (m) return m[1];
+  m = t.match(/(\d+)\s*AWG/);             if (m) return m[1];
+  m = t.match(/(\d+)\s*[X]\s*(\d+)/);     if (m) return m[1] + "x" + m[2];
+  m = t.match(/\d+/);                     return m ? m[0] : null;
+}
+
+/* Cables que no llevan borna estándar por calibre */
+function sinBornaEstandar(desc) {
+  var t = limpia(desc);
+  return t.indexOf("DUPLEX") >= 0 || t.indexOf("SPT") >= 0 ||
+         t.indexOf("ENCAU") >= 0 || t.indexOf("ALAMBRON") >= 0 ||
+         t.indexOf("UTP") >= 0 || t.indexOf("COAXIAL") >= 0;
+}
+function esUTP(desc) { return limpia(desc).indexOf("UTP") >= 0; }
+
+function listaCables(cat) {
+  var d = (cat && cat.comp && cat.comp.cableado) || [];
+  return d.map(function (r, i) {
+    return {
+      i: i, cod: codClave(r["codigo cable"]), desc: txt(r["descricion cable"]),
+      pmo: aNum(r["cantidades mano de obra"]),
+      codMo: codClave(r["Codigo mano de obra"]), nomMo: txt(r["nombre mano de obra"])
+    };
+  }).filter(function (c) { return c.cod && c.desc; });
+}
+
+function bornaPorCalibre(cat, calibre) {
+  var d = (cat && cat.comp && cat.comp.bornas) || [];
+  for (var i = 0; i < d.length; i++) {
+    var desc = txt(d[i]["Descripcion"]);
+    if (limpia(desc).indexOf("COAXIAL") >= 0) continue;   /* el RG-6 va solo a los UTP */
+    if (calibreDe(desc) === calibre) {
+      return { cod: codClave(d[i]["Codigo Bornas"]), desc: desc, und: txt(d[i]["UNIDAD"]) };
+    }
+  }
+  return null;
+}
+function conectorCoaxial(cat) {
+  var d = (cat && cat.comp && cat.comp.bornas) || [];
+  for (var i = 0; i < d.length; i++) {
+    if (limpia(d[i]["Descripcion"]).indexOf("COAXIAL") >= 0) {
+      return { cod: codClave(d[i]["Codigo Bornas"]), desc: txt(d[i]["Descripcion"]), und: txt(d[i]["UNIDAD"]) };
+    }
+  }
+  return null;
+}
+
+/* Compone una acometida: los cables, su mano de obra y sus bornas */
+function componerCableado(cat, fila) {
+  var cables = listaCables(cat);
+  var porCod = {};
+  cables.forEach(function (c) { porCod[c.cod] = c; });
+
+  var lineas = [], avisos = [];
+  var totalPmo = 0, moRef = null;
+  var bornasPorCal = {}, utpTotal = 0;
+
+  var metrado = Number(fila.metrado) || 0;
+  var repite = Number(fila.repite) || 0;
+  var divisor = metrado > 0 ? metrado : 1;
+  var factor = repite > 0 ? repite : 1;
+
+  ["fase", "neutro", "tierra"].forEach(function (rol) {
+    var codCable = fila[rol];
+    var cant = Number(fila["cant" + rol.charAt(0).toUpperCase() + rol.slice(1)]) || 0;
+    if (!codCable || cant <= 0) return;
+
+    var c = porCod[codClave(codCable)];
+    if (!c) { avisos.push("El cable de " + rol + " ya no está en el catálogo"); return; }
+
+    lineas.push({ cant: cant, cod: c.cod, desc: c.desc, und: "ML" });
+    totalPmo += c.pmo * cant;
+    if (!moRef) moRef = c;
+
+    if (fila.bornas) {
+      if (esUTP(c.desc)) utpTotal += cant;
+      else if (!sinBornaEstandar(c.desc)) {
+        var k = calibreDe(c.desc);
+        if (k) bornasPorCal[k] = (bornasPorCal[k] || 0) + cant;
+      }
+    }
+  });
+
+  if (totalPmo > 0 && moRef) {
+    lineas.push({ cant: totalPmo, cod: moRef.codMo, desc: moRef.nomMo, und: "Hrs" });
+  }
+
+  if (fila.bornas) {
+    Object.keys(bornasPorCal).forEach(function (k) {
+      var b = bornaPorCalibre(cat, k);
+      if (!b) { avisos.push("No hay borna para calibre " + k); return; }
+      lineas.push({
+        cant: (bornasPorCal[k] * 2) / divisor * factor,
+        cod: b.cod, desc: b.desc, und: b.und
+      });
+    });
+    if (utpTotal > 0) {
+      var rg = conectorCoaxial(cat);
+      if (rg) lineas.push({ cant: (utpTotal * 2) / divisor * factor, cod: rg.cod, desc: rg.desc, und: rg.und });
+      else avisos.push("No se encontró el conector coaxial RG-6");
+    }
+  }
+
+  return { lineas: lineas, aviso: avisos.length ? avisos.join(" · ") : null };
+}
+
 /* Compone todas las filas de un análisis */
 function componerAnalisis(cat, datos, p, apu) {
   var lineas = [], avisos = [], reglas = [], creados = [];
@@ -715,6 +833,12 @@ function componerAnalisis(cat, datos, p, apu) {
     var r = componerEquipo(cat, fila, p, apu);
     if (r.aviso) { avisos.push("Equipo " + (i + 1) + ": " + r.aviso); return; }
     if (r.creado) creados.push(r.creado);
+    lineas = lineas.concat(r.lineas);
+  });
+
+  ((datos && datos.CA) || []).forEach(function (fila, i) {
+    var r = componerCableado(cat, fila);
+    if (r.aviso) avisos.push("Acometida " + (i + 1) + ": " + r.aviso);
     lineas = lineas.concat(r.lineas);
   });
 
@@ -737,9 +861,26 @@ function componerAnalisis(cat, datos, p, apu) {
     mapa[l.cod] = { cant: l.cant, cod: l.cod, desc: l.desc, und: l.und, f075: l.f075, propio: l.propio };
     orden.push(l.cod);
   });
+  /* Ajustes manuales: cantidad cambiada o línea quitada en este análisis */
+  var aj = (datos && datos.ajustes) || {};
+  var finales = [];
+  orden.forEach(function (c) {
+    var l = mapa[c];
+    var a = aj[c];
+    if (a && a.quitado) return;
+    if (a && a.cant !== undefined && a.cant !== null && a.cant !== "") {
+      l.cantOrig = l.cant;
+      l.cant = Number(a.cant) || 0;
+      l.ajustada = true;
+    }
+    finales.push(l);
+  });
+
+  var quitadas = 0;
+  Object.keys(aj).forEach(function (c) { if (aj[c] && aj[c].quitado && mapa[c]) quitadas++; });
+
   return {
-    lineas: orden.map(function (c) { return mapa[c]; }),
-    avisos: avisos, reglas: reglas, creados: creados
+    lineas: finales, avisos: avisos, reglas: reglas, creados: creados, quitadas: quitadas
   };
 }
 
@@ -1411,7 +1552,8 @@ function renderProyectos() {
         '<a class="enlace" href="https://www.lutec.com.co/" target="_blank" rel="noopener">lutec.com.co</a></div></div>' +
       '</div>' +
       '<div class="btnrow">' +
-        '<button class="btn" id="importar">Importar respaldo</button>' +
+        '<button class="btn" id="exportall">Respaldo completo</button>' +
+        '<button class="btn" id="importar">Restaurar</button>' +
         '<button class="btn btnp" id="nuevo">Nuevo proyecto</button>' +
       '</div>' +
     '</div></header>' +
@@ -1421,10 +1563,11 @@ function renderProyectos() {
         : '<div class="card"><div class="empty">' +
           '<div class="dropt">Todavía no hay proyectos</div>' +
           'Crea el primero y sube el anexo de cantidades del cliente.</div></div>') +
-      '<div class="note"><div class="notet">Dónde se guardan</div>' +
-      '<div class="noteb">Esta versión guarda los proyectos en este navegador y en este equipo. ' +
-      'No se comparten con tus compañeros ni sobreviven si borras los datos del sitio. ' +
-      'Usa el respaldo de cada proyecto para moverlo a otra máquina.</div></div>' +
+      '<div class="note"><div class="notet">Cómo llevarlo a otro equipo</div>' +
+      '<div class="noteb"><strong>Respaldo completo</strong> baja un archivo con el catálogo, los precios ' +
+      'y todos los proyectos. En el otro equipo, abre la misma dirección y pulsa <strong>Restaurar</strong>. ' +
+      'Queda todo igual. Ten en cuenta que no es sincronización: si los dos trabajan a la vez, cada uno ' +
+      'avanza por su lado y el último respaldo que se restaure pisa al otro.</div></div>' +
       '<input type="file" id="fimport" accept="application/json,.json" class="hide">' +
     '</main>';
 
@@ -1433,17 +1576,58 @@ function renderProyectos() {
     vista.borrador = { nombre: "", cliente: "", ciudad: "", recibo: hoy(), entrega: "", hojas: null, archivo: "" };
     ir({ pantalla: "nuevo" });
   };
+  document.getElementById("exportall").onclick = function () {
+    var paquete = {
+      formato: "apu-respaldo",
+      version: 1,
+      fecha: new Date().toISOString(),
+      catalogo: Catalogo.leer(),
+      proyectos: Store.todos(),
+      historial: Historial.leer()
+    };
+    var blob = new Blob([JSON.stringify(paquete)], { type: "application/json" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "respaldo_apu_" + hoy() + ".json";
+    a.click(); URL.revokeObjectURL(a.href);
+  };
+
   document.getElementById("importar").onclick = function () { document.getElementById("fimport").click(); };
   document.getElementById("fimport").onchange = function (e) {
     var f = e.target.files[0]; if (!f) return;
     var fr = new FileReader();
     fr.onload = function () {
-      try {
-        var p = JSON.parse(fr.result);
-        if (!p.id || !p.nombre) throw new Error("formato");
-        p.id = id();
-        Store.guardar(p); render();
-      } catch (err) { alert("Ese archivo no es un respaldo de proyecto válido."); }
+      var datos;
+      try { datos = JSON.parse(fr.result); }
+      catch (err) { avisoError("Ese archivo no se pudo leer como respaldo."); return; }
+
+      /* Respaldo completo */
+      if (datos && datos.formato === "apu-respaldo") {
+        var nP = (datos.proyectos || []).length;
+        var nI = datos.catalogo && datos.catalogo.items ? datos.catalogo.items.length : 0;
+        if (!confirm("Este respaldo trae " + nP + (nP === 1 ? " proyecto" : " proyectos") +
+                     " y un catálogo de " + nI + " insumos.\n\n" +
+                     "Se reemplaza todo lo que haya en este navegador. ¿Seguir?")) return;
+        try {
+          if (datos.catalogo) Catalogo.guardar(datos.catalogo);
+          _cacheProy = datos.proyectos || [];
+          localStorage.setItem(CLAVE, JSON.stringify(_cacheProy));
+          if (datos.historial) localStorage.setItem(CLAVE_HIST, JSON.stringify(datos.historial));
+          ir({ pantalla: "proyectos", tope: 150 });
+        } catch (err) {
+          avisoError("No se pudo restaurar: " + (err && err.message ? err.message : err) +
+            ". Puede ser falta de espacio en el navegador.");
+        }
+        return;
+      }
+
+      /* Respaldo de un solo proyecto */
+      if (datos && datos.id && datos.nombre) {
+        datos.id = id();
+        Store.guardar(datos); render();
+        return;
+      }
+      avisoError("Ese archivo no es un respaldo válido de esta aplicación.");
     };
     fr.readAsText(f);
   };
@@ -2038,6 +2222,7 @@ function listaApu(p, lista, act) {
 
 /* Panel derecho: encabezado, formularios y composición */
 function panelApu(p, cat, act) {
+  var f;
   var datos = datosDe(p, act.apu);
   var filasTU = datos.TU || [];
   var tieneTU = act.cod.indexOf("TU") >= 0;
@@ -2126,6 +2311,55 @@ function panelApu(p, cat, act) {
       '<button class="btn" id="masEQ">+ Agregar equipo</button></div></div>';
   }
 
+  /* --- formulario de cableados --- */
+  var filasCA = datos.CA || [];
+  var formCA = "";
+  if (act.cod.indexOf("CA") >= 0) {
+    var cables = listaCables(cat);
+    var opCable = function (valor) {
+      return '<option value="">Elegir cable\u2026</option>' +
+        cables.map(function (c) {
+          return '<option value="' + esc(c.cod) + '"' + (codClave(valor) === c.cod ? " selected" : "") +
+            '>' + esc(c.desc) + '</option>';
+        }).join("");
+    };
+    var linea = function (i, rol, etiq) {
+      var campoC = rol, campoQ = "cant" + rol.charAt(0).toUpperCase() + rol.slice(1);
+      return '<div class="g cafila" style="grid-template-columns:74px 1fr 72px">' +
+        '<div class="carol">' + etiq + '</div>' +
+        '<div><select class="in" data-ca="' + i + '|' + campoC + '">' + opCable(f[campoC]) + '</select></div>' +
+        '<div><input class="in m" type="number" min="0" step="1" data-ca="' + i + '|' + campoQ + '" ' +
+          'placeholder="cant." value="' + (f[campoQ] || "") + '"></div>' +
+      '</div>';
+    };
+    var bloquesCA = filasCA.map(function (fx, i) {
+      f = fx;
+      return '<div class="bloque">' +
+        '<div class="bloque-hd"><span class="bloque-n">Acometida ' + (i + 1) + '</span>' +
+          '<button class="btnx" data-quitaca="' + i + '">Quitar</button></div>' +
+        '<div class="field"><label class="lbl">Nombre</label>' +
+          '<input class="in" data-ca="' + i + '|nombre" placeholder="C\u00f3mo se llama" value="' +
+          esc(f.nombre || "") + '"></div>' +
+        linea(i, "fase", "Fase") + linea(i, "neutro", "Neutro") + linea(i, "tierra", "Tierra") +
+        '<div class="g" style="grid-template-columns:1fr 1fr 1fr;margin-top:9px">' +
+          '<div><label class="lbl">Metrado</label>' +
+            '<input class="in m" type="number" min="0" step="0.01" data-ca="' + i + '|metrado" value="' +
+            (f.metrado === undefined ? 1 : f.metrado) + '"></div>' +
+          '<div><label class="lbl">Repite</label>' +
+            '<input class="in m" type="number" min="0" step="1" data-ca="' + i + '|repite" value="' +
+            (f.repite === undefined ? 1 : f.repite) + '"></div>' +
+          '<div><label class="lbl">Bornas</label>' +
+            '<input type="checkbox" data-cachk="' + i + '"' + (f.bornas ? " checked" : "") +
+            ' style="margin-top:8px"></div>' +
+        '</div></div>';
+    }).join("");
+
+    formCA = '<div class="card"><div class="chd"><span class="ct">Cableados</span>' +
+      '<span class="cn">' + filasCA.length + (filasCA.length === 1 ? " acometida" : " acometidas") + '</span></div>' +
+      '<div class="cbd">' + (bloquesCA || '<p style="margin:0 0 12px;font-size:13px;color:var(--ink2)">Sin acometidas todav\u00eda.</p>') +
+      '<button class="btn" id="masCA">+ Agregar acometida</button></div></div>';
+  }
+
   /* --- formulario de tableros --- */
   var filasTA = datos.TA || [];
   var formTA = "";
@@ -2207,7 +2441,7 @@ function panelApu(p, cat, act) {
   }
 
   /* --- apartados aún no portados --- */
-  var listos = ["TU", "EQ", "TA", "mo"];
+  var listos = ["TU", "EQ", "TA", "CA", "mo"];
   var pendientes = act.cod.filter(function (c) { return listos.indexOf(c) < 0; });
   var avisoPend = pendientes.length
     ? '<div class="note"><div class="notet">Apartados en camino</div><div class="noteb">' +
@@ -2235,9 +2469,12 @@ function panelApu(p, cat, act) {
           (l.base && Math.abs(l.precio - l.base) > 0.5
             ? '<div class="base">costo ' + cop(l.base) + '</div>' : "");
       }
-      return '<tr' + (l.mo ? ' class="morow"' : "") + '>' +
-        '<td class="num">' + dec(l.cant) + '</td>' +
-        '<td class="m" style="font-size:12px">' + esc(l.cod) + (l.f075 ? ' <span class="f75">·75%</span>' : "") + '</td>' +
+      return '<tr' + (l.mo ? ' class="morow"' : "") + (l.ajustada ? ' data-aj="1"' : "") + '>' +
+        '<td class="num"><input class="in m incant' + (l.ajustada ? " tocada" : "") + '" type="number" ' +
+          'min="0" step="0.0001" data-ajcant="' + esc(l.cod) + '" value="' + l.cant + '"' +
+          (l.ajustada ? ' title="Cantidad ajustada. Original: ' + dec(l.cantOrig) + '"' : "") + '></td>' +
+        '<td class="m" style="font-size:12px">' + esc(l.cod) + (l.f075 ? ' <span class="f75">·75%</span>' : "") +
+          (l.ajustada ? ' <span class="ajmarca" title="ajustada">±</span>' : "") + '</td>' +
         '<td>' + esc(l.desc) + '</td>' +
         '<td style="color:var(--ink3);font-size:12px">' + esc(l.und) + '</td>' +
         '<td style="text-align:center">' + (l.enCatalogo && !l.mo
@@ -2245,6 +2482,10 @@ function panelApu(p, cat, act) {
             ' title="Insumo importado: lleva el factor de dólar">' : "") + '</td>' +
         '<td class="num">' + celPrecio + '</td>' +
         '<td class="num">' + (l.falta ? "—" : cop(l.total)) + '</td>' +
+        '<td style="text-align:center">' +
+          (l.ajustada ? '<button class="btnx" data-ajrest="' + esc(l.cod) + '" title="Volver a la cantidad del catálogo">Volver</button>'
+                      : '<button class="btnx btnxdel" data-ajquita="' + esc(l.cod) + '" title="Quitar de este análisis">Quitar</button>') +
+        '</td>' +
       '</tr>';
     }).join("");
 
@@ -2252,9 +2493,14 @@ function panelApu(p, cat, act) {
         '<th class="num" style="width:78px">Cant.</th><th style="width:104px">Código</th>' +
         '<th>Descripción</th><th style="width:52px">Und</th>' +
         '<th style="width:44px;text-align:center" title="Importado">Imp.</th>' +
-        '<th class="num" style="width:104px">Vr. venta</th><th class="num" style="width:96px">Vr. total</th>' +
+        '<th class="num" style="width:100px">Vr. venta</th><th class="num" style="width:94px">Vr. total</th>' +
+        '<th style="width:56px"><span class="sr">Acciones</span></th>' +
       '</tr></thead><tbody>' + filas + '</tbody></table></div>' +
       '<div class="cbd" style="border-top:1px solid var(--line2)">' +
+        (comp.quitadas ? '<div class="note" style="margin:0 0 13px"><div class="notet">Líneas quitadas</div>' +
+          '<div class="noteb">Se quitaron ' + comp.quitadas + ' insumos de este análisis. ' +
+          'No se tocó el catálogo, solo este APU. ' +
+          '<button class="btn btnmini" id="ajlimpiar" style="margin-left:6px">Devolver todo</button></div></div>' : "") +
         (val.sinPrecio ? '<div class="err" style="margin-bottom:13px">' + val.sinPrecio +
           (val.sinPrecio === 1 ? " insumo no tiene precio" : " insumos no tienen precio") +
           ' en el catálogo. El total de abajo está incompleto.</div>' : "") +
@@ -2275,7 +2521,7 @@ function panelApu(p, cat, act) {
         (val.directo > 0 ? '<div class="ok" style="margin-top:13px">La mano de obra pesa ' +
           val.pesoMo + '% del costo directo.</div>' : "") +
       '</div>';
-  } else if (!filasTU.length && !filasEQ.length && !filasTA.length && !filasMO.length) {
+  } else if (!filasTU.length && !filasEQ.length && !filasTA.length && !filasMO.length && !filasCA.length) {
     cuerpoComp = '<div class="empty">Agrega una línea arriba y la composición aparece aquí.</div>';
   } else {
     var faltan = [];
@@ -2312,7 +2558,7 @@ function panelApu(p, cat, act) {
         '<div class="m" style="font-size:11px;color:var(--ink3);margin-top:7px">' +
         act.items.map(function (x) { return fmt(x.cant) + " " + esc(x.und); }).join("  ·  ") + '</div>' +
       '</div></div>' +
-    avisoPend + formTU + formEQ + formTA + formMO + reglas + avisos + tabla +
+    avisoPend + formCA + formTU + formEQ + formTA + formMO + reglas + avisos + tabla +
     '<div class="card"><div class="chd"><span class="ct">Consideraciones del análisis</span></div>' +
       '<div class="cbd"><textarea class="in" id="notaapu" ' +
       'placeholder="Por qué se armó así, qué se asumió, qué quedó por fuera.">' + esc(nota) + '</textarea></div></div>';
@@ -2453,6 +2699,83 @@ function enlazarPanel(p) {
       if (e.key === "Enter") { e.preventDefault(); el.blur(); }
     };
   });
+
+  /* --- cableados --- */
+  var masC = document.getElementById("masCA");
+  if (masC) masC.onclick = function () {
+    var d = datosDe(p, act.apu);
+    if (!d.CA) d.CA = [];
+    d.CA.push({ nombre: "", fase: "", cantFase: "", neutro: "", cantNeutro: "",
+                tierra: "", cantTierra: "", metrado: 1, repite: 1, bornas: false });
+    Store.guardar(p); refrescarPanel(p);
+  };
+  Array.prototype.forEach.call(document.querySelectorAll("[data-quitaca]"), function (b) {
+    b.onclick = function () {
+      var d = datosDe(p, act.apu);
+      d.CA.splice(Number(b.dataset.quitaca), 1);
+      Store.guardar(p); refrescarPanel(p);
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-cachk]"), function (c) {
+    c.onchange = function () {
+      var d = datosDe(p, act.apu);
+      var f = d.CA[Number(c.dataset.cachk)];
+      if (!f) return;
+      f.bornas = c.checked;
+      Store.guardar(p); refrescarPanel(p);
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-ca]"), function (el) {
+    var q = el.dataset.ca.split("|"), campo = q[1];
+    el.onchange = function () {
+      var d = datosDe(p, act.apu);
+      var f = d.CA && d.CA[Number(q[0])];
+      if (!f) return;
+      f[campo] = (campo.indexOf("cant") === 0 || campo === "metrado" || campo === "repite")
+        ? (Number(el.value) || 0) : el.value;
+      Store.guardar(p); refrescarPanel(p);
+    };
+    if (el.tagName === "INPUT") el.onkeydown = function (e) {
+      if (e.key === "Enter") { e.preventDefault(); el.blur(); }
+    };
+  });
+
+  /* --- ajustes por línea del análisis --- */
+  var ajDe = function () {
+    var d = datosDe(p, act.apu);
+    if (!d.ajustes) d.ajustes = {};
+    return d.ajustes;
+  };
+  Array.prototype.forEach.call(document.querySelectorAll("[data-ajcant]"), function (el) {
+    el.onchange = function () {
+      var aj = ajDe(), cod = el.dataset.ajcant;
+      aj[cod] = aj[cod] || {};
+      aj[cod].cant = el.value === "" ? null : Number(el.value) || 0;
+      Store.guardar(p); refrescarPanel(p);
+    };
+    el.onkeydown = function (e) { if (e.key === "Enter") { e.preventDefault(); el.blur(); } };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-ajquita]"), function (b) {
+    b.onclick = function () {
+      var aj = ajDe(), cod = b.dataset.ajquita;
+      aj[cod] = aj[cod] || {};
+      aj[cod].quitado = true;
+      Store.guardar(p); refrescarPanel(p);
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-ajrest]"), function (b) {
+    b.onclick = function () {
+      var aj = ajDe();
+      delete aj[b.dataset.ajrest];
+      Store.guardar(p); refrescarPanel(p);
+    };
+  });
+  var ajl = document.getElementById("ajlimpiar");
+  if (ajl) ajl.onclick = function () {
+    var d = datosDe(p, act.apu);
+    d.ajustes = {};
+    Store.guardar(p); refrescarPanel(p);
+  };
 
   /* --- tableros --- */
   var masT = document.getElementById("masTA");
