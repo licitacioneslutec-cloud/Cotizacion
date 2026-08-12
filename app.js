@@ -1428,10 +1428,7 @@ function renderCatalogo() {
           '<th style="width:44px;text-align:center" title="Importado">Imp.</th>' +
           '<th style="width:104px">Proveedor</th><th style="width:88px">Actualizado</th>' +
         '</tr></thead><tbody>' +
-        secc("I · Materiales", [filasMat]) +
-        (filasTh ? secc("II · Transporte y herramienta", [], filasTh) : "") +
-        secc("III · Mano de obra", [filasMo]) +
-      '</tbody></table></div>' +
+        filas + '</tbody></table></div>' +
         (lista.length > muestra.length
           ? '<div class="cbd" style="border-top:1px solid var(--line2);text-align:center">' +
             '<button class="btn" id="masfilas">Ver ' + Math.min(150, lista.length - muestra.length) +
@@ -3410,10 +3407,7 @@ function vInsumos(p) {
         '<th class="num" style="width:108px">Vale</th>' +
         '<th style="width:92px">Análisis</th>' +
       '</tr></thead><tbody>' +
-        secc("I · Materiales", [filasMat]) +
-        (filasTh ? secc("II · Transporte y herramienta", [], filasTh) : "") +
-        secc("III · Mano de obra", [filasMo]) +
-      '</tbody></table></div>' +
+        filas + '</tbody></table></div>' +
     '</div>' +
 
     '<div class="note"><div class="notet">Qué muestra la cantidad</div>' +
