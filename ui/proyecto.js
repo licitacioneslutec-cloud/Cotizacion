@@ -354,8 +354,7 @@ function vFicha(p, r) {
   if (mg.rent === undefined) mg.rent = 10;
   if (mg.dolar === undefined) mg.dolar = 19;
 
-  var campos = [["rent", "Rentabilidad"], ["dolar", "IVA importados"],
-                ["admin", "Administración"], ["imprev", "Imprevistos"],
+  var campos = [["admin", "Administración"], ["imprev", "Imprevistos"],
                 ["util", "Utilidad"], ["iva", "IVA s/ utilidad"]]
     .map(function (c) {
       return '<div><label class="lbl" for="mg-' + c[0] + '">' + c[1] + ' %</label>' +
@@ -437,11 +436,11 @@ function vFicha(p, r) {
         '<div class="dlr"><span class="dlk">Imprevistos</span><span class="dlv m">' + cop(t.imprev) + '</span></div>' +
         '<div class="dlr"><span class="dlk">Utilidad</span><span class="dlv m">' + cop(t.util) + '</span></div>' +
         '<div class="dlr"><span class="dlk">IVA sobre utilidad</span><span class="dlv m">' + cop(t.iva) + '</span></div>' +
-        '<div class="dlr dltot"><span class="dlk">Valor total</span><span class="dlv m">' + cop(t.total) + '</span></div>' +
+        '<div class="dlr dltot"><span class="dlk">Valor total</span><span class="dlv m">' + cop((p.forma || "junta") === "separada" ? t.totalSep : t.total) + '</span></div>' +
       '</div>' +
-      '<div class="ok" style="margin-top:13px">La rentabilidad y el IVA de importados se montan sobre el precio de cada ' +
-      'insumo: costo dividido entre uno menos el factor. El de importados solo aplica a los insumos marcados. ' +
-      'Administración, imprevistos, utilidad e IVA van una sola vez sobre el subtotal.</div>' +
+      '<div class="ok" style="margin-top:13px">La rentabilidad y el IVA se montan sobre el precio de cada insumo: ' +
+      'costo dividido entre uno menos el factor. Administración, imprevistos, utilidad e IVA van una sola vez ' +
+      'sobre el subtotal.</div>' +
     '</div></div>';
 }
 
@@ -673,6 +672,8 @@ function vArmado(p, r) {
   var cat = Catalogo.leer();
   var t = cat ? totalesProyecto(p, cat) : { porApu: {} };
   var sep = (p.forma || "junta") === "separada";
+  var verPct = !!vista.verPctMatMo;
+  var verTot = vista.verTotales !== false; // default true
 
   var pestanas = p.hojas.map(function (h, i) {
     if (!h.usar) return "";
@@ -691,7 +692,8 @@ function vArmado(p, r) {
   var cuenta = {};
   itemsDe(p).forEach(function (x) { if (x.f.apu) cuenta[x.f.apu] = (cuenta[x.f.apu] || 0) + 1; });
 
-  var colspan = sep ? 11 : 9;
+  var extraCols = (verPct ? 2 : 0) + (sep ? (verTot ? 4 : 2) : (verTot ? 2 : 1));
+  var colspan = 7 + extraCols;
   var cuerpo = "", capPend = null, visibles = 0;
   h.filas.forEach(function (f, fi) {
     if (f.tipo === "cap") { capPend = f; return; }
@@ -719,21 +721,35 @@ function vArmado(p, r) {
     /* precio del análisis de este ítem: unitario y total (× cantidad de este ítem) */
     var a = f.apu ? (t.porApu[f.apu] || {}) : {};
     var qf = Number(f.cant) || 0;
+
+    var celPct = '';
+    if (verPct) {
+      if (!f.apu || !a.unitario || a.unitario <= 0) {
+        celPct = '<td class="num">—</td><td class="num">—</td>';
+      } else {
+        var pctMat = Math.round((a.matConTh / a.unitario) * 100);
+        var pctMo = 100 - pctMat;
+        celPct = '<td class="num" style="font-size:11px;color:var(--ink2)">' + pctMat + '%</td>' +
+                 '<td class="num" style="font-size:11px;color:var(--ink2)">' + pctMo + '%</td>';
+      }
+    }
+
     var celPrecio;
     if (!f.apu) {
       celPrecio = sep
-        ? '<td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td>'
-        : '<td class="num">—</td><td class="num">—</td>';
+        ? '<td class="num">—</td>' + (verTot ? '<td class="num">—</td>' : '') +
+          '<td class="num">—</td>' + (verTot ? '<td class="num">—</td>' : '')
+        : '<td class="num">—</td>' + (verTot ? '<td class="num">—</td>' : '');
     } else if (sep) {
       celPrecio =
         '<td class="num pmat">' + (a.matConTh ? cop(a.matConTh) : "—") + '</td>' +
-        '<td class="num pmat">' + (a.matConTh ? cop(a.matConTh * qf) : "—") + '</td>' +
+        (verTot ? '<td class="num pmat">' + (a.matConTh ? cop(a.matConTh * qf) : "—") + '</td>' : '') +
         '<td class="num pmo">' + (a.mo ? cop(a.mo) : "—") + '</td>' +
-        '<td class="num pmo">' + (a.mo ? cop(a.mo * qf) : "—") + '</td>';
+        (verTot ? '<td class="num pmo">' + (a.mo ? cop(a.mo * qf) : "—") + '</td>' : '');
     } else {
       celPrecio =
         '<td class="num">' + (a.unitario ? cop(a.unitario) : "—") + '</td>' +
-        '<td class="num prtotal">' + (a.unitario ? cop(a.unitario * qf) : "—") + '</td>';
+        (verTot ? '<td class="num prtotal">' + (a.unitario ? cop(a.unitario * qf) : "—") + '</td>' : '');
     }
 
     cuerpo += '<tr class="itrow' + (marcada ? " sel" : "") + '" data-fila="' + k + '">' +
@@ -747,7 +763,7 @@ function vArmado(p, r) {
       '<td' + tie + '><div class="apu' + (comparte ? " apudup" : "") + '">' +
         '<input class="in m inapu" data-apunum="' + k + '" value="' + (f.apu || "") +
           '" placeholder="—" title="Escribe un número para asignar o unir análisis"></div></td>' +
-      celPrecio +
+      celPct + celPrecio +
     '</tr>';
   });
 
@@ -763,19 +779,29 @@ function vArmado(p, r) {
       '<button class="btn" id="cancelar">Cancelar</button></div>'
     : "";
 
+  var encPct = verPct
+    ? '<th style="width:52px;text-align:right">% Mat</th><th style="width:52px;text-align:right">% MO</th>'
+    : '';
+
   var encPrecio = sep
     ? '<th style="width:88px;text-align:right">Sumin. unit</th>' +
-      '<th style="width:92px;text-align:right">Sumin. total</th>' +
+      (verTot ? '<th style="width:92px;text-align:right">Sumin. total</th>' : '') +
       '<th style="width:88px;text-align:right">M.O. unit</th>' +
-      '<th style="width:92px;text-align:right">M.O. total</th>'
+      (verTot ? '<th style="width:92px;text-align:right">M.O. total</th>' : '')
     : '<th style="width:100px;text-align:right">Vr. unitario</th>' +
-      '<th style="width:104px;text-align:right">Vr. total</th>';
+      (verTot ? '<th style="width:104px;text-align:right">Vr. total</th>' : '');
 
   return '<div class="card">' +
       '<div class="chd"><span class="ct">Armado de análisis</span>' +
       '<span class="cn">' + r.items + ' ítems · ' + r.analisis + ' análisis · ' + r.asignados + ' asignados</span></div>' +
       '<div class="cbd barmado">' +
         '<div class="tabs tabsfijas">' + pestanas + '</div>' +
+        '<div class="togsarmado" style="display:flex;gap:16px;align-items:center;margin:8px 0">' +
+          '<label class="lbl" style="font-size:12px;cursor:pointer"><input type="checkbox" id="togpct"' +
+            (verPct ? ' checked' : '') + '> % Material / M.O.</label>' +
+          '<label class="lbl" style="font-size:12px;cursor:pointer"><input type="checkbox" id="togtot"' +
+            (verTot ? ' checked' : '') + '> Valores totales</label>' +
+        '</div>' +
         '<input class="in infiltro" id="filtroarmado" placeholder="Filtrar por descripción o ítem" value="' +
           esc(vista.filtroArmado || "") + '">' +
       '</div>' +
@@ -784,7 +810,7 @@ function vArmado(p, r) {
         '<th style="width:58px">Ítem</th><th>Descripción</th>' +
         '<th style="width:38px">Und</th><th style="width:56px" class="num">Cant.</th>' +
         '<th style="width:210px">Apartados</th><th style="width:54px;text-align:center">Análisis</th>' +
-        encPrecio +
+        encPct + encPrecio +
       '</tr></thead><tbody>' + cuerpo + '</tbody></table></div>' + barra +
     '</div>' +
     '<div class="note"><div class="notet">Cómo se usa</div>' +
@@ -802,6 +828,10 @@ function enlazarArmado(p) {
     var n = document.getElementById("filtroarmado");
     if (n) { n.focus(); n.setSelectionRange(pos, pos); }
   };
+  var tp = document.getElementById("togpct");
+  if (tp) tp.onchange = function () { vista.verPctMatMo = this.checked; var y = window.scrollY; render(); window.scrollTo(0, y); };
+  var tt = document.getElementById("togtot");
+  if (tt) tt.onchange = function () { vista.verTotales = this.checked; var y = window.scrollY; render(); window.scrollTo(0, y); };
   Array.prototype.forEach.call(document.querySelectorAll("[data-hoja]"), function (b) {
     b.onclick = function () { ir({ hoja: Number(b.dataset.hoja), sel: [] }); };
   });

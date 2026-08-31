@@ -66,12 +66,29 @@ function vApartados(p) {
     '<div class="pctnota">Se calculan sobre el subtotal de materiales de cada análisis y valen para todo el proyecto.</div>' +
   '</div></div>';
 
+  var listaFiltrada = filtrarApus(lista);
+
   return barraPct + '<div class="g g32">' +
       '<div class="card" style="margin:0"><div class="chd"><span class="ct">Análisis</span>' +
-      '<span class="cn">' + lista.length + '</span></div>' +
-      '<div class="alist" id="listaapu">' + listaApu(p, lista, act) + '</div></div>' +
+      '<span class="cn">' + listaFiltrada.length + ' de ' + lista.length + '</span></div>' +
+      '<div style="padding:0 10px 8px"><input class="in" id="filtroapu" placeholder="Buscar por número o descripción" value="' +
+        esc(vista.filtroApu || '') + '"></div>' +
+      '<div class="alist" id="listaapu">' + listaApu(p, listaFiltrada, act) + '</div></div>' +
       '<div id="panelapu">' + panelApu(p, cat, act) + '</div>' +
     '</div>';
+}
+
+/* Filtra la lista de análisis por número de APU o texto de descripción del anexo,
+   según lo que haya escrito el usuario en #filtroapu */
+function filtrarApus(lista) {
+  var filtro = (vista.filtroApu || "").toLowerCase();
+  if (!filtro) return lista;
+  return lista.filter(function (a) {
+    if (String(a.apu).indexOf(filtro) >= 0) return true;
+    return a.items.some(function (it) {
+      return (it.desc || "").toLowerCase().indexOf(filtro) >= 0;
+    });
+  });
 }
 
 function listaApu(p, lista, act) {
@@ -161,15 +178,12 @@ function panelApu(p, cat, act) {
             '<div><label class="lbl">C\u00f3digo</label>' +
               '<div class="m codnuevo">' + (f.codItem ? esc(f.codItem) : "se asigna solo") + '</div></div>' +
           '</div>' +
-          '<div class="g" style="grid-template-columns:116px 1fr 44px;margin-top:8px">' +
+          '<div class="g" style="grid-template-columns:116px 1fr;margin-top:8px">' +
             '<div><label class="lbl">Unidad</label>' +
               '<input class="in" data-eq="' + i + '|unidad" placeholder="UND" value="' + esc(f.unidad || "") + '"></div>' +
             '<div><label class="lbl">Precio costo</label>' +
               '<input class="in m" type="number" min="0" step="1" data-eq="' + i + '|precio" ' +
               'placeholder="sin precio" value="' + (f.precio || "") + '"></div>' +
-            '<div><label class="lbl">Imp.</label>' +
-              '<input type="checkbox" data-eqimp="' + i + '"' + (f.imp ? " checked" : "") +
-              ' title="Importado" style="margin-top:8px"></div>' +
           '</div></div>' : "") +
       '</div>';
     }).join("");
@@ -471,14 +485,33 @@ function panelApu(p, cat, act) {
         (val.sinPrecio ? '<div class="err" style="margin-bottom:13px">' + val.sinPrecio +
           (val.sinPrecio === 1 ? " insumo no tiene precio" : " insumos no tienen precio") +
           ' en el catálogo. El total de abajo está incompleto.</div>' : "") +
-        '<div class="dl">' +
-          '<div class="dlr"><span class="dlk">Subtotal materiales</span><span class="dlv m">' + cop(val.mat) + '</span></div>' +
-          (val.th > 0 ? '<div class="dlr"><span class="dlk">Transporte y herramienta</span>' +
-            '<span class="dlv m">' + cop(val.th) + '</span></div>' : "") +
-          '<div class="dlr"><span class="dlk">Subtotal mano de obra</span><span class="dlv m">' + cop(val.mo) + '</span></div>' +
-          '<div class="dlr dltot"><span class="dlk">Costo directo</span>' +
-            '<span class="dlv m">' + cop(val.unitario) + '</span></div>' +
-        '</div>' +
+        (function () {
+          var esSep = (p.forma || "junta") === "separada";
+          if (esSep) {
+            var mg = p.margenes || {};
+            var pA = (mg.admin || 0) / 100, pI = (mg.imprev || 0) / 100;
+            var pU = (mg.util || 0) / 100, pV = (mg.iva || 0) / 100;
+            var aiuT = pA + pI + pU + pU * pV;
+            var matDisp = pV > 0 ? val.matConTh * (1 + aiuT) / (1 + pV) : val.matConTh * (1 + aiuT);
+            var ivaMat = matDisp * pV;
+            var moDisp = val.mo * (1 + aiuT);
+            return '<div class="dl">' +
+              '<div class="dlr"><span class="dlk">Suministro</span><span class="dlv m">' + cop(matDisp) + '</span></div>' +
+              '<div class="dlr"><span class="dlk">IVA ' + (mg.iva || 0) + '%</span><span class="dlv m">' + cop(ivaMat) + '</span></div>' +
+              '<div class="dlr"><span class="dlk">Mano de obra</span><span class="dlv m">' + cop(moDisp) + '</span></div>' +
+              '<div class="dlr dltot"><span class="dlk">Costo directo</span>' +
+                '<span class="dlv m">' + cop(val.unitario) + '</span></div>' +
+            '</div>';
+          }
+          return '<div class="dl">' +
+            '<div class="dlr"><span class="dlk">Subtotal materiales</span><span class="dlv m">' + cop(val.mat) + '</span></div>' +
+            (val.th > 0 ? '<div class="dlr"><span class="dlk">Transporte y herramienta</span>' +
+              '<span class="dlv m">' + cop(val.th) + '</span></div>' : "") +
+            '<div class="dlr"><span class="dlk">Subtotal mano de obra</span><span class="dlv m">' + cop(val.mo) + '</span></div>' +
+            '<div class="dlr dltot"><span class="dlk">Costo directo</span>' +
+              '<span class="dlv m">' + cop(val.unitario) + '</span></div>' +
+          '</div>';
+        })() +
         '<div class="aporte">' + act.items.map(function (x) {
             return '<div class="dlr"><span class="dlk">' + esc(x.item) + ' · ' + fmt(x.cant) + ' ' + esc(x.und) +
               '</span><span class="dlv m">' + cop(val.unitario * (Number(x.cant) || 0)) + '</span></div>';
@@ -582,7 +615,7 @@ function refrescarPanel(p, foco) {
   }
 
   var lst = document.getElementById("listaapu");
-  if (lst) { lst.innerHTML = listaApu(p, analisisDe(p), act); enlazarLista(p); }
+  if (lst) { lst.innerHTML = listaApu(p, filtrarApus(analisisDe(p)), act); enlazarLista(p); }
 
   if (foco) {
     var el = document.querySelector('[data-tu="' + foco + '"]');
@@ -594,6 +627,17 @@ function enlazarLista(p) {
   Array.prototype.forEach.call(document.querySelectorAll("[data-apu]"), function (b) {
     b.onclick = function () { vista.apu = Number(b.dataset.apu); refrescarPanel(p); };
   });
+
+  var fa = document.getElementById("filtroapu");
+  if (fa) fa.oninput = function () {
+    vista.filtroApu = this.value;
+    var pos = this.selectionStart;
+    var y = window.scrollY;
+    render();
+    window.scrollTo(0, y);
+    var n = document.getElementById("filtroapu");
+    if (n) { n.focus(); n.setSelectionRange(pos, pos); }
+  };
 }
 
 function enlazarPanel(p) {
@@ -657,15 +701,6 @@ function enlazarPanel(p) {
     b.onclick = function () {
       var d = datosDe(p, act.apu);
       d.EQ.splice(Number(b.dataset.quitaeq), 1);
-      Store.guardar(p); refrescarPanel(p);
-    };
-  });
-  Array.prototype.forEach.call(document.querySelectorAll("[data-eqimp]"), function (c) {
-    c.onchange = function () {
-      var d = datosDe(p, act.apu);
-      var f = d.EQ[Number(c.dataset.eqimp)];
-      if (!f) return;
-      f.imp = c.checked;
       Store.guardar(p); refrescarPanel(p);
     };
   });
@@ -782,8 +817,15 @@ function enlazarPanel(p) {
   if (masC) masC.onclick = function () {
     var d = datosDe(p, act.apu);
     if (!d.CA) d.CA = [];
+    var met = 0, rep = 0;
+    analisisDe(p).forEach(function (a) {
+      if (a.apu === act.apu) {
+        rep = a.items.length;
+        a.items.forEach(function (it) { met += Number(it.cant) || 0; });
+      }
+    });
     d.CA.push({ nombre: "", fase: "", cantFase: "", neutro: "", cantNeutro: "",
-                tierra: "", cantTierra: "", metrado: 1, repite: 1, bornas: false });
+                tierra: "", cantTierra: "", metrado: met || 1, repite: rep || 1, bornas: false });
     Store.guardar(p); refrescarPanel(p);
   };
   Array.prototype.forEach.call(document.querySelectorAll("[data-quitaca]"), function (b) {

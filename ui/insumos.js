@@ -26,6 +26,7 @@ function insumosDe(p, cat) {
     u.und = u.und || (it ? it.und : "");
     u.precio = it ? Number(it.precio) || 0 : 0;
     u.imp = it ? !!it.imp : false;
+    u.rent = it ? (it.rent !== undefined ? !!it.rent : true) : true;
     u.desp = it ? Number(it.desp) || 0 : 0;
     u.ofertas = it ? (it.ofertas || []) : [];
     u.sel = it ? it.sel : undefined;
@@ -62,18 +63,20 @@ function vInsumos(p) {
   var impMat = lista.filter(function (i) { return !i.mo; });
   var impTot = impMat.length;
   var impCount = impMat.filter(function (i) { return i.imp; }).length;
+  var rentTot = lista.length;
+  var rentCount = lista.filter(function (i) { return i.rent; }).length;
   var totalMat = 0, totalMo = 0;
   lista.forEach(function (i) {
-    var v = i.cantidad * precioAjustado({ precio: i.precio, imp: i.imp, ofertas: i.ofertas, sel: i.sel, cod: i.cod }, mg, p);
+    var v = i.cantidad * precioAjustado({ precio: i.precio, imp: i.imp, rent: i.rent, ofertas: i.ofertas, sel: i.sel, cod: i.cod }, mg, p);
     if (i.mo) totalMo += v; else totalMat += v;
   });
 
   var rent = Number(mg.rent) || 0, ivImp = Number(mg.dolar) || 0;
   var filas = ver.map(function (i) {
-    var itRef = { precio: i.precio, imp: i.imp, ofertas: i.ofertas, sel: i.sel, cod: i.cod };
+    var itRef = { precio: i.precio, imp: i.imp, rent: i.rent, ofertas: i.ofertas, sel: i.sel, cod: i.cod };
     var costo = costoDe(itRef, p);
-    /* precio con rentabilidad, y luego con IVA de importados si aplica */
-    var conRent = costo > 0 && rent > 0 ? costo / (1 - rent / 100) : costo;
+    /* precio con rentabilidad, y luego con IVA si aplica */
+    var conRent = costo > 0 && rent > 0 && i.rent !== false ? costo / (1 - rent / 100) : costo;
     var venta = precioAjustado(itRef, mg, p);
     var tieneOf = i.ofertas.length > 0;
     /* La celda de costo es editable: si hay proveedor elegido, edita ESE precio */
@@ -97,8 +100,8 @@ function vInsumos(p) {
               '</option>';
           }).join("") + '</select>'
         : '<span style="color:var(--ink3);font-size:12px">sin proveedor</span>') + '</td>' +
-      '<td style="text-align:center">' + (i.mo ? "" :
-        '<input type="checkbox" data-iimp="' + esc(i.cod) + '"' + (i.imp ? " checked" : "") + '>') + '</td>' +
+      '<td style="text-align:center"><input type="checkbox" data-iimp="' + esc(i.cod) + '"' + (i.imp ? " checked" : "") + '></td>' +
+      '<td style="text-align:center"><input type="checkbox" data-irent="' + esc(i.cod) + '"' + (i.rent ? " checked" : "") + '></td>' +
       '<td class="num">' + (costo > 0 ? cop(venta * i.cantidad) : "—") + '</td>' +
     '</tr>';
   }).join("");
@@ -114,6 +117,15 @@ function vInsumos(p) {
            : '<div class="ok">Todos los insumos de este proyecto tienen precio.</div>') +
     '</div></div>' +
 
+    '<div class="card"><div class="cbd">' +
+      '<div class="g" style="grid-template-columns:1fr 1fr;margin-bottom:0;max-width:300px">' +
+        '<div><label class="lbl" for="mg-rent">Rentabilidad %</label>' +
+          '<input class="in m" type="number" min="0" max="100" step="0.5" id="mg-rent" value="' + (mg.rent || 0) + '"></div>' +
+        '<div><label class="lbl" for="mg-dolar">IVA %</label>' +
+          '<input class="in m" type="number" min="0" max="100" step="0.5" id="mg-dolar" value="' + (mg.dolar || 0) + '"></div>' +
+      '</div>' +
+    '</div></div>' +
+
     '<div class="card">' +
       '<div class="chd"><span class="ct">Insumos de este proyecto</span>' +
       '<span class="cn">' + ver.length + ' de ' + lista.length + '</span></div>' +
@@ -122,10 +134,12 @@ function vInsumos(p) {
           esc(vista.buscaIns || "") + '">' +
         '<label class="lbl" style="margin-top:10px"><input type="checkbox" id="solosinins"' +
           (vista.soloSinIns ? " checked" : "") + '> Ver solo los que no tienen precio</label>' +
-        '<div class="btnrow" style="margin-top:11px">' +
-          '<button class="btn btnmini" id="impall">Marcar todos como importados</button>' +
-          '<button class="btn btnmini" id="impnone">Quitar importado a todos</button>' +
-          '<span class="pctnota" style="min-width:0">' + impCount + ' de ' + impTot + ' marcados</span>' +
+        '<div class="btnrow" style="margin-top:11px;flex-wrap:wrap;gap:6px">' +
+          '<button class="btn btnmini" id="impall">Marcar IVA a todos</button>' +
+          '<button class="btn btnmini" id="impnone">Quitar IVA a todos</button>' +
+          '<button class="btn btnmini" id="rentall">Marcar Rent. a todos</button>' +
+          '<button class="btn btnmini" id="rentnone">Quitar Rent. a todos</button>' +
+          '<span class="pctnota" style="min-width:0">IVA: ' + impCount + '/' + impTot + ' · Rent: ' + rentCount + '/' + rentTot + '</span>' +
         '</div>' +
       '</div>' +
       '<div class="scroll"><table class="tbl"><thead><tr>' +
@@ -133,9 +147,10 @@ function vInsumos(p) {
         '<th class="num" style="width:88px">Cantidad</th>' +
         '<th class="num" style="width:100px" title="Precio de compra">Costo</th>' +
         '<th class="num" style="width:100px" title="Costo con rentabilidad">+ Rent.</th>' +
-        '<th class="num" style="width:100px" title="Con rentabilidad e IVA de importados">Venta</th>' +
+        '<th class="num" style="width:100px" title="Con rentabilidad e IVA">Venta</th>' +
         '<th style="width:150px">Proveedor</th>' +
-        '<th style="width:40px;text-align:center" title="Importado">Imp.</th>' +
+        '<th style="width:40px;text-align:center" title="Aplica IVA">IVA</th>' +
+        '<th style="width:40px;text-align:center" title="Aplica Rentabilidad">Rent.</th>' +
         '<th class="num" style="width:104px">Vale</th>' +
       '</tr></thead><tbody>' +
         filas + '</tbody></table></div>' +
@@ -165,7 +180,6 @@ function enlazarInsumos(p) {
     var lista = insumosDe(p, cat);
     var n = 0;
     lista.forEach(function (i) {
-      if (i.mo) return;  /* la mano de obra no lleva IVA de importados */
       if (p.propios && p.propios[i.cod]) {
         if (!!p.propios[i.cod].imp !== valor) { p.propios[i.cod].imp = valor; n++; }
       } else if (idx[i.cod] !== undefined) {
@@ -178,10 +192,46 @@ function enlazarInsumos(p) {
   };
   var ia = document.getElementById("impall");
   if (ia) ia.onclick = function () {
-    if (confirm("¿Marcar todos los materiales de este proyecto como importados? Les aplicará el IVA de importados.")) marcarImp(true);
+    if (confirm("¿Marcar IVA a todos los insumos de este proyecto?")) marcarImp(true);
   };
   var inn = document.getElementById("impnone");
   if (inn) inn.onclick = function () { marcarImp(false); };
+
+  var marcarRent = function (valor) {
+    var cat = Catalogo.leer();
+    var idx = Catalogo.indice(cat);
+    var lista = insumosDe(p, cat);
+    var n = 0;
+    lista.forEach(function (i) {
+      if (p.propios && p.propios[i.cod]) {
+        if (!!p.propios[i.cod].rent !== valor) { p.propios[i.cod].rent = valor; n++; }
+      } else if (idx[i.cod] !== undefined) {
+        if (!!cat.items[idx[i.cod]].rent !== valor) { cat.items[idx[i.cod]].rent = valor; n++; }
+      }
+    });
+    Catalogo.guardar(cat); Store.guardar(p);
+    var y = window.scrollY; render(); window.scrollTo(0, y);
+    avisoOk((valor ? "Se marcaron " : "Se desmarcaron ") + n + " insumos.");
+  };
+  var ra = document.getElementById("rentall");
+  if (ra) ra.onclick = function () {
+    if (confirm("¿Marcar Rentabilidad a todos los insumos de este proyecto?")) marcarRent(true);
+  };
+  var rn = document.getElementById("rentnone");
+  if (rn) rn.onclick = function () {
+    if (confirm("¿Quitar Rentabilidad a todos los insumos de este proyecto?")) marcarRent(false);
+  };
+
+  var rField = document.getElementById("mg-rent");
+  if (rField) rField.onchange = function () {
+    p.margenes.rent = Number(this.value) || 0;
+    Store.guardar(p); var y = window.scrollY; render(); window.scrollTo(0, y);
+  };
+  var dField = document.getElementById("mg-dolar");
+  if (dField) dField.onchange = function () {
+    p.margenes.dolar = Number(this.value) || 0;
+    Store.guardar(p); var y = window.scrollY; render(); window.scrollTo(0, y);
+  };
 
   var editar = function (attr, aplica) {
     Array.prototype.forEach.call(document.querySelectorAll("[" + attr + "]"), function (el) {
@@ -216,6 +266,7 @@ function enlazarInsumos(p) {
     el.onkeydown = function (e) { if (e.key === "Enter") { e.preventDefault(); el.blur(); } };
   });
   editar("data-iimp", function (it, el) { it.imp = el.checked; });
+  editar("data-irent", function (it, el) { it.rent = el.checked; });
 }
 
 /* ---- 7.8 Paso 5: entrega ---- */
@@ -236,7 +287,7 @@ function vEntrega(p) {
       '</div>'
     : '<div class="g g2">' +
         '<div><div class="subt">Materiales</div><div class="dl">' +
-          '<div class="dlr"><span class="dlk">Subtotal</span><span class="dlv m">' + cop(t.subMat) + '</span></div>' +
+          '<div class="dlr"><span class="dlk">Subtotal</span><span class="dlv m">' + cop(t.matDisplay) + '</span></div>' +
           '<div class="dlr"><span class="dlk">IVA ' + (p.margenes.iva || 0) + '%</span><span class="dlv m">' + cop(t.ivaMat) + '</span></div>' +
           '<div class="dlr dltot"><span class="dlk">Total materiales</span><span class="dlv m">' + cop(t.totalMat) + '</span></div>' +
         '</div></div>' +

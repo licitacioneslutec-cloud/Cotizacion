@@ -184,7 +184,7 @@ function registrarPropio(p, fila) {
     desc: txt(fila.nombreItem) || prev.desc || "",
     und: undForm || prev.und || "UND",
     precio: precioForm > 0 ? precioForm : (Number(prev.precio) || 0),
-    imp: fila.imp !== undefined ? !!fila.imp : !!prev.imp,
+    imp: fila.imp !== undefined ? !!fila.imp : (prev.imp !== undefined ? !!prev.imp : true),
     desp: aNum(fila.desp) || Number(prev.desp) || 0,
     propio: true
   };
@@ -677,8 +677,8 @@ function componerAnalisis(cat, datos, p, apu) {
   };
 }
 
-/* Precio de venta de un insumo: al costo se le monta la rentabilidad y,
-   si es importado, el factor de dólar. Ambos sobre el precio de venta,
+/* Precio de venta de un insumo: al costo se le monta la rentabilidad (si aplica)
+   y el IVA (si aplica). Ambos sobre el precio de venta,
    igual que en la hoja de márgenes: costo / (1 - factor). */
 /* Oferta vigente de un insumo: la que eligió el proyecto, o la marcada
    por defecto en el catálogo, o el precio suelto si no hay ofertas. */
@@ -699,8 +699,8 @@ function costoDe(it, p) {
 function precioAjustado(it, mg, p) {
   var base = costoDe(it, p);
   if (base <= 0) return 0;
-  var rent = it.rent !== undefined && it.rent !== null ? Number(it.rent) : Number(mg.rent || 0);
-  var dol = it.imp ? (it.dol !== undefined && it.dol !== null ? Number(it.dol) : Number(mg.dolar || 0)) : 0;
+  var rent = it.rent === false ? 0 : Number(mg.rent || 0);
+  var dol = it.imp ? Number(mg.dolar || 0) : 0;
   var v = base;
   if (rent > 0 && rent < 100) v = v / (1 - rent / 100);
   if (dol > 0 && dol < 100) v = v / (1 - dol / 100);

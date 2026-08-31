@@ -42,17 +42,19 @@ function totalesProyecto(p, cat) {
   var admin = subtotal * pA, imprev = subtotal * pI, util = subtotal * pU;
   var iva = util * pV;
 
-  /* Forma separada: el material lleva IVA; la mano de obra lleva AIU y su IVA sobre la utilidad */
-  var ivaMat = subMat * pV;
+  /* Forma separada: AIU se reparte proporcionalmente para que totalSep === total */
+  var aiuTotal = pA + pI + pU + pU * pV;
+  var matDisplay = pV > 0 ? subMat * (1 + aiuTotal) / (1 + pV) : subMat * (1 + aiuTotal);
+  var ivaMat = matDisplay * pV;
+  var totalMat = matDisplay + ivaMat;
   var moAdmin = subMo * pA, moImprev = subMo * pI, moUtil = subMo * pU;
   var moIva = moUtil * pV;
-  var totalMat = subMat + ivaMat;
   var totalMo = subMo + moAdmin + moImprev + moUtil + moIva;
 
   return {
     subtotal: subtotal, admin: admin, imprev: imprev, util: util, iva: iva,
     total: subtotal + admin + imprev + util + iva,
-    subMat: subMat, ivaMat: ivaMat, totalMat: totalMat,
+    subMat: subMat, matDisplay: matDisplay, ivaMat: ivaMat, totalMat: totalMat,
     subMo: subMo, moAdmin: moAdmin, moImprev: moImprev, moUtil: moUtil, moIva: moIva, totalMo: totalMo,
     totalSep: totalMat + totalMo,
     conValor: conValor, sinValor: sinValor, faltantes: faltantes,

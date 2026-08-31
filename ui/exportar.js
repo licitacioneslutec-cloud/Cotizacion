@@ -10,6 +10,31 @@ function imprimirPropuesta(p) {
   var t = totalesProyecto(p, cat);
   var sep = (p.forma || "junta") === "separada";
   var mg = p.margenes || {};
+  var pA = (mg.admin || 0) / 100, pI = (mg.imprev || 0) / 100;
+  var pU = (mg.util || 0) / 100, pV = (mg.iva || 0) / 100;
+  var aiuTotal = pA + pI + pU + pU * pV;
+  var matItem = function (valor) {
+    var v = Number(valor) || 0;
+    return pV > 0 ? v * (1 + aiuTotal) / (1 + pV) : v * (1 + aiuTotal);
+  };
+  var materialVisibleTotal = 0, materialVisibleIva = 0, manoObraVisibleTotal = 0;
+  var hojas = Array.isArray(p.hojas) ? p.hojas : [];
+  hojas.forEach(function (h) {
+    if (!h || !h.usar) return;
+    var filas = Array.isArray(h.filas) ? h.filas : [];
+    filas.forEach(function (f) {
+      if (!f || f.tipo !== "it") return;
+      var apu = f.apu || null;
+      var a = apu && t.porApu ? (t.porApu[apu] || {}) : {};
+      var q = Number(f.cant) || 0;
+      var mat = Number(a.matConTh) || 0;
+      var mo = Number(a.mo) || 0;
+      materialVisibleTotal += (mat > 0 ? matItem(mat) * q : 0);
+      manoObraVisibleTotal += (mo > 0 ? mo * q : 0);
+    });
+  });
+  materialVisibleIva = materialVisibleTotal * pV;
+  var materialVisibleTotalConIva = materialVisibleTotal + materialVisibleIva;
 
   var filaTot = function (k, v, fuerte) {
     return '<tr' + (fuerte ? ' class="tot"' : "") + '><td class="k">' + esc(k) + '</td>' +
@@ -19,13 +44,16 @@ function imprimirPropuesta(p) {
   var resumen = sep
     ? '<table class="res"><tbody>' +
         '<tr class="sec"><td colspan="2">Materiales</td></tr>' +
-        filaTot("Subtotal", t.subMat) + filaTot("IVA " + (mg.iva || 0) + "%", t.ivaMat) +
-        filaTot("Total materiales", t.totalMat, true) +
+        filaTot("Subtotal", materialVisibleTotal) +
+        filaTot("IVA " + (mg.iva || 0) + "%", materialVisibleIva) +
+        filaTot("Total materiales", materialVisibleTotalConIva, true) +
         '<tr class="sec"><td colspan="2">Mano de obra</td></tr>' +
-        filaTot("Subtotal", t.subMo) + filaTot("Administración " + (mg.admin || 0) + "%", t.moAdmin) +
+        filaTot("Subtotal", manoObraVisibleTotal) +
+        filaTot("Administración " + (mg.admin || 0) + "%", t.moAdmin) +
         filaTot("Imprevistos " + (mg.imprev || 0) + "%", t.moImprev) +
         filaTot("Utilidad " + (mg.util || 0) + "%", t.moUtil) +
-        filaTot("IVA sobre la utilidad", t.moIva) + filaTot("Total mano de obra", t.totalMo, true) +
+        filaTot("IVA sobre la utilidad " + (mg.iva || 0) + "%", t.moIva) +
+        filaTot("Total mano de obra", t.totalMo, true) +
         '<tr class="gran"><td class="k">Valor total de la propuesta</td><td class="v">' + cop(t.totalSep) + '</td></tr>' +
       '</tbody></table>'
     : '<table class="res"><tbody>' +
@@ -38,34 +66,46 @@ function imprimirPropuesta(p) {
       '</tbody></table>';
 
   var cot = "";
-  (p.hojas || []).forEach(function (h) {
-    if (!h.usar) return;
+  var notasApuPdf = p.notasApu || {};
+  var hojas = Array.isArray(p.hojas) ? p.hojas : [];
+  hojas.forEach(function (h) {
+    if (!h || !h.usar) return;
     var cuerpo = "";
-    h.filas.forEach(function (f) {
+    var filas = Array.isArray(h.filas) ? h.filas : [];
+    filas.forEach(function (f) {
+      if (!f) return;
       if (f.tipo === "cap") {
-        cuerpo += '<tr class="cap"><td>' + esc(f.item) + '</td><td colspan="' + (sep ? 6 : 4) + '">' +
+        cuerpo += '<tr class="cap"><td></td><td>' + esc(f.item) + '</td><td colspan="' + (sep ? 6 : 4) + '">' +
           esc(f.desc) + '</td></tr>';
         return;
       }
-      var a = t.porApu[f.apu] || {};
+      var apu = f.apu || null;
+      var a = apu && t.porApu ? (t.porApu[apu] || {}) : {};
       var q = Number(f.cant) || 0;
-      cuerpo += '<tr><td class="c">' + esc(f.item) + '</td><td>' + esc(f.desc) + '</td>' +
+      var nota = apu ? (notasApuPdf[apu] || "") : "";
+      var matVal = Number(a.matConTh) || 0;
+      var matU = sep ? matItem(matVal) : null;
+      var matT = matU !== null ? matU * q : null;
+      var moU = Number(a.mo) || 0;
+      cuerpo += '<tr><td class="c">' + (apu || "") + '</td><td class="c">' + esc(f.item) + '</td><td>' + esc(f.desc) + '</td>' +
         '<td class="c">' + esc(f.und) + '</td><td class="n">' + fmt(q) + '</td>' +
         (sep
-          ? '<td class="n">' + (a.matConTh ? cop(a.matConTh) : "—") + '</td>' +
-            '<td class="n">' + (a.matConTh ? cop(a.matConTh * q) : "—") + '</td>' +
-            '<td class="n">' + (a.mo ? cop(a.mo) : "—") + '</td>' +
-            '<td class="n">' + (a.mo ? cop(a.mo * q) : "—") + '</td>'
+          ? '<td class="n">' + (matU !== null ? cop(matU) : "—") + '</td>' +
+            '<td class="n">' + (matT !== null ? cop(matT) : "—") + '</td>' +
+            '<td class="n">' + (moU > 0 ? cop(moU) : "—") + '</td>' +
+            '<td class="n">' + (moU > 0 ? cop(moU * q) : "—") + '</td>'
           : '<td class="n">' + (a.unitario ? cop(a.unitario) : "—") + '</td>' +
             '<td class="n">' + (a.unitario ? cop(a.unitario * q) : "—") + '</td>') +
+        '<td style="font-size:8px">' + esc(nota) + '</td>' +
       '</tr>';
     });
     cot += '<h3>' + esc(h.nombre) + '</h3><table class="cot"><thead><tr>' +
-      '<th style="width:8%">Ítem</th><th>Descripción</th><th style="width:5%">Und</th>' +
-      '<th style="width:7%">Cant.</th>' +
-      (sep ? '<th style="width:11%">Sumin. unit</th><th style="width:12%">Sumin. total</th>' +
-             '<th style="width:11%">M.O. unit</th><th style="width:12%">M.O. total</th>'
-           : '<th style="width:13%">Vr. unitario</th><th style="width:14%">Vr. total</th>') +
+      '<th style="width:5%">APU</th><th style="width:7%">Ítem</th><th>Descripción</th><th style="width:4%">Und</th>' +
+      '<th style="width:6%">Cant.</th>' +
+      (sep ? '<th style="width:10%">Sumin. unit</th><th style="width:11%">Sumin. total</th>' +
+             '<th style="width:10%">M.O. unit</th><th style="width:11%">M.O. total</th>'
+           : '<th style="width:12%">Vr. unitario</th><th style="width:13%">Vr. total</th>') +
+      '<th style="width:14%">Notas</th>' +
       '</tr></thead><tbody>' + cuerpo + '</tbody></table>';
   });
 
@@ -75,8 +115,8 @@ function imprimirPropuesta(p) {
     var comp = componerAnalisis(cat, datos, p, a.apu);
     var val = valorizar(cat, comp.lineas, margenesDe(p, a.apu), p);
     var fl = function (l) {
-      return '<tr><td class="n">' + dec(l.cantDesp) + '</td><td class="c">' + esc(l.cod) + '</td>' +
-        '<td>' + esc(l.desc) + '</td><td class="c">' + esc(l.und) + '</td>' +
+      return '<tr><td class="c">' + esc(l.cod) + '</td><td>' + esc(l.desc) + '</td>' +
+        '<td class="c">' + esc(l.und) + '</td><td class="n">' + dec(l.cantDesp) + '</td>' +
         '<td class="n">' + (l.desp ? l.desp + "%" : "") + '</td>' +
         '<td class="n">' + (l.falta ? "—" : cop(l.precio)) + '</td>' +
         '<td class="n">' + (l.falta ? "—" : cop(l.total)) + '</td></tr>';
@@ -84,18 +124,19 @@ function imprimirPropuesta(p) {
     ana += '<div class="apu"><div class="apuhd"><span class="apun">APU ' + a.apu + '</span>' +
       '<span class="apui">' + a.items.map(function (x) { return esc(x.item); }).join(", ") + '</span>' +
       '<span class="apud">' + esc(a.items[0] ? a.items[0].desc : "") + '</span></div>' +
-      '<table class="cot"><thead><tr><th style="width:10%">Cant.</th><th style="width:12%">Código</th>' +
-      '<th>Descripción</th><th style="width:6%">Und</th><th style="width:7%">Desp.</th>' +
+      '<table class="cot"><thead><tr><th style="width:12%">Código</th>' +
+      '<th>Descripción</th><th style="width:6%">Und</th><th style="width:10%">Cant.</th><th style="width:7%">Desp.</th>' +
       '<th style="width:13%">Vr. unit</th><th style="width:14%">Vr. total</th></tr></thead><tbody>' +
       '<tr class="cap"><td colspan="7">I · Materiales</td></tr>' +
       val.lineas.filter(function (l) { return !l.mo; }).map(fl).join("") +
       '<tr class="sub"><td colspan="6">Subtotal materiales</td><td class="n">' + cop(val.mat) + '</td></tr>' +
       (val.th > 0
         ? '<tr class="cap"><td colspan="7">II · Transporte y herramienta</td></tr>' +
-          '<tr><td></td><td class="c">TR1</td><td>Transportes</td><td></td><td class="n">' + dec(val.pctTrans) + '%</td>' +
+          '<tr><td class="c">TR1</td><td>Transportes</td><td></td><td></td><td class="n">' + dec(val.pctTrans) + '%</td>' +
           '<td></td><td class="n">' + cop(val.transporte) + '</td></tr>' +
-          '<tr><td></td><td class="c">HER1</td><td>Herramienta de mano</td><td></td><td class="n">' + dec(val.pctHerr) + '%</td>' +
-          '<td></td><td class="n">' + cop(val.herramienta) + '</td></tr>'
+          '<tr><td class="c">HER1</td><td>Herramienta de mano</td><td></td><td></td><td class="n">' + dec(val.pctHerr) + '%</td>' +
+          '<td></td><td class="n">' + cop(val.herramienta) + '</td></tr>' +
+          '<tr class="sub"><td colspan="6">Subtotal transporte y herramienta</td><td class="n">' + cop(val.th) + '</td></tr>'
         : "") +
       '<tr class="cap"><td colspan="7">III · Mano de obra</td></tr>' +
       val.lineas.filter(function (l) { return l.mo; }).map(fl).join("") +
@@ -153,6 +194,31 @@ function exportarTodo(p) {
   var t = totalesProyecto(p, cat);
   var sep = (p.forma || "junta") === "separada";
   var mg = p.margenes || {};
+  var pA = (mg.admin || 0) / 100, pI = (mg.imprev || 0) / 100;
+  var pU = (mg.util || 0) / 100, pV = (mg.iva || 0) / 100;
+  var aiuTotal = pA + pI + pU + pU * pV;
+  var matItem = function (valor) {
+    var v = Number(valor) || 0;
+    return pV > 0 ? v * (1 + aiuTotal) / (1 + pV) : v * (1 + aiuTotal);
+  };
+  var materialVisibleTotal = 0, materialVisibleIva = 0, manoObraVisibleTotal = 0;
+  var hojas = Array.isArray(p.hojas) ? p.hojas : [];
+  hojas.forEach(function (h) {
+    if (!h || !h.usar) return;
+    var filas = Array.isArray(h.filas) ? h.filas : [];
+    filas.forEach(function (f) {
+      if (!f || f.tipo !== "it") return;
+      var apu = f.apu || null;
+      var a = apu && t.porApu ? (t.porApu[apu] || {}) : {};
+      var q = Number(f.cant) || 0;
+      var matVal = Number(a.matConTh) || 0;
+      var moVal = Number(a.mo) || 0;
+      materialVisibleTotal += (matVal > 0 ? matItem(matVal) * q : 0);
+      manoObraVisibleTotal += (moVal > 0 ? moVal * q : 0);
+    });
+  });
+  materialVisibleIva = materialVisibleTotal * pV;
+  var materialVisibleTotalConIva = materialVisibleTotal + materialVisibleIva;
 
   var NAVY = "FF0F2436", LIME = "FFA6CE39", GRIS = "FFF4F6F8", GRIS2 = "FFFAFBFC";
   var moneda = '"$"#,##0';
@@ -222,12 +288,14 @@ function exportarTodo(p) {
     fila++;
   };
   if (sep) {
-    res("Materiales · subtotal", t.subMat);
-    res("IVA " + (mg.iva || 0) + "%", t.ivaMat);
-    res("Total materiales", t.totalMat, true);
-    res("Mano de obra · subtotal", t.subMo);
-    res("AIU", t.moAdmin + t.moImprev + t.moUtil);
-    res("IVA sobre utilidad", t.moIva);
+    res("Materiales · subtotal", materialVisibleTotal);
+    res("IVA " + (mg.iva || 0) + "%", materialVisibleIva);
+    res("Total materiales", materialVisibleTotalConIva, true);
+    res("Mano de obra · subtotal", manoObraVisibleTotal);
+    res("Administración " + (mg.admin || 0) + "%", t.moAdmin);
+    res("Imprevistos " + (mg.imprev || 0) + "%", t.moImprev);
+    res("Utilidad " + (mg.util || 0) + "%", t.moUtil);
+    res("IVA sobre la utilidad " + (mg.iva || 0) + "%", t.moIva);
     res("Total mano de obra", t.totalMo, true);
     fila++;
     res("VALOR TOTAL", t.totalSep, true);
@@ -261,35 +329,46 @@ function exportarTodo(p) {
   /* ===== 2. COTIZACIÓN ===== */
   var c2 = wb.addWorksheet("Cotización", { views: [{ showGridLines: false }] });
   var encCot = sep
-    ? ["Ítem", "Descripción", "Und", "Cant.", "APU", "Sumin. unit", "Sumin. total", "M.O. unit", "M.O. total"]
-    : ["Ítem", "Descripción", "Und", "Cant.", "APU", "Vr. unitario", "Vr. total"];
-  c2.columns = (sep ? [11, 48, 7, 10, 7, 14, 15, 14, 15] : [11, 55, 7, 11, 7, 15, 17]).map(function (w) { return { width: w }; });
+    ? ["APU", "Ítem", "Descripción", "Und", "Cant.", "Sumin. unit", "Sumin. total", "M.O. unit", "M.O. total", "Notas"]
+    : ["APU", "Ítem", "Descripción", "Und", "Cant.", "Vr. unitario", "Vr. total", "Notas"];
+  c2.columns = (sep ? [7, 11, 40, 7, 10, 14, 15, 14, 15, 25] : [7, 11, 47, 7, 11, 15, 17, 25]).map(function (w) { return { width: w }; });
   c2.addRow(encCot).eachCell(thd);
   c2.getRow(1).height = 18;
 
   var rc = 2;
-  (p.hojas || []).forEach(function (h) {
-    if (!h.usar) return;
+  var notasApu = p.notasApu || {};
+  var hojas = Array.isArray(p.hojas) ? p.hojas : [];
+  hojas.forEach(function (h) {
+    if (!h || !h.usar) return;
     var hr = c2.addRow([h.nombre]);
-    c2.mergeCells("A" + rc + ":" + (sep ? "I" : "G") + rc);
+    c2.mergeCells("A" + rc + ":" + (sep ? "J" : "H") + rc);
     hr.getCell(1).font = { bold: true, size: 10, color: { argb: NAVY } };
     hr.getCell(1).fill = fill(LIME); rc++;
-    h.filas.forEach(function (f) {
+    var filas = Array.isArray(h.filas) ? h.filas : [];
+    filas.forEach(function (f) {
+      if (!f) return;
       if (f.tipo === "cap") {
-        var cr = c2.addRow([f.item, f.desc]);
+        var cr = c2.addRow(["", f.item, f.desc]);
         cr.eachCell(function (cel) { cel.font = { bold: true, size: 9, color: { argb: "FF5A6B7B" } };
           cel.fill = fill(GRIS); }); rc++; return;
       }
-      var a = t.porApu[f.apu] || {}; var q = Number(f.cant) || 0;
+      var apu = f.apu || null;
+      var a = apu && t.porApu ? (t.porApu[apu] || {}) : {};
+      var q = Number(f.cant) || 0;
+      var nota = apu ? (notasApu[apu] || "") : "";
+      var matU = sep ? matItem(Number(a.matConTh) || 0) : null;
+      var matT = matU !== null ? matU * q : null;
+      var moU = Number(a.mo) || 0;
       var r = sep
-        ? c2.addRow([f.item, f.desc, f.und, q, f.apu || "", a.matConTh || null, a.matConTh ? a.matConTh * q : null,
-            a.mo || null, a.mo ? a.mo * q : null])
-        : c2.addRow([f.item, f.desc, f.und, q, f.apu || "", a.unitario || null, a.unitario ? a.unitario * q : null]);
+        ? c2.addRow([apu || "", f.item, f.desc, f.und, q, matU, matT,
+            moU || null, moU ? moU * q : null, nota || null])
+        : c2.addRow([apu || "", f.item, f.desc, f.und, q, a.unitario || null, a.unitario ? a.unitario * q : null, nota || null]);
       r.eachCell(function (cel, cn) {
         cel.border = borde; cel.font = { size: 9 };
-        if (cn >= 6) cel.numFmt = moneda;
-        if (cn === 4) cel.numFmt = "#,##0.##";
-        if (cn === 5) cel.alignment = { horizontal: "center" };
+        if (cn >= 6 && cn <= (sep ? 9 : 7)) cel.numFmt = moneda;
+        if (cn === 5) cel.numFmt = "#,##0.##";
+        if (cn === 1) cel.alignment = { horizontal: "center" };
+        if (cn === (sep ? 10 : 8)) cel.alignment = { wrapText: true };
       });
       if (rc % 2 === 0) r.eachCell(function (cel) { if (!cel.fill || !cel.fill.fgColor) cel.fill = fill(GRIS2); });
       rc++;
@@ -297,7 +376,7 @@ function exportarTodo(p) {
   });
   c2.addRow([]); rc++;
   var totCot = function (k, v, col) {
-    var arr = new Array(sep ? 9 : 7).fill(null);
+    var arr = new Array(sep ? 10 : 8).fill(null);
     arr[1] = k; arr[col] = v;
     var r = c2.addRow(arr);
     r.getCell(2).font = { bold: true, color: { argb: NAVY } };
@@ -306,10 +385,15 @@ function exportarTodo(p) {
   };
   if (sep) {
     /* col 6 = Sumin. total, col 8 = M.O. total (índices base 0) */
-    totCot("Subtotal materiales", t.subMat, 6);
-    totCot("Subtotal mano de obra", t.subMo, 8);
-    totCot("Total materiales (con IVA)", t.totalMat, 6);
-    totCot("Total mano de obra (con AIU)", t.totalMo, 8);
+    totCot("Subtotal materiales", materialVisibleTotal, 6);
+    totCot("IVA materiales " + (mg.iva || 0) + "%", materialVisibleIva, 6);
+    totCot("Total materiales", materialVisibleTotalConIva, 6);
+    totCot("Subtotal mano de obra", manoObraVisibleTotal, 8);
+    totCot("Administración mano de obra " + (mg.admin || 0) + "%", t.moAdmin, 8);
+    totCot("Imprevistos mano de obra " + (mg.imprev || 0) + "%", t.moImprev, 8);
+    totCot("Utilidad mano de obra " + (mg.util || 0) + "%", t.moUtil, 8);
+    totCot("IVA sobre utilidad mano de obra " + (mg.iva || 0) + "%", t.moIva, 8);
+    totCot("Total mano de obra", t.totalMo, 8);
   } else {
     totCot("Subtotal", t.subtotal, 6);
     totCot("AIU", t.admin + t.imprev + t.util, 6);
@@ -319,7 +403,7 @@ function exportarTodo(p) {
 
   /* ===== 3. ANÁLISIS ===== */
   var a3 = wb.addWorksheet("Análisis", { views: [{ showGridLines: false }] });
-  a3.columns = [11, 13, 56, 7, 8, 14, 15].map(function (w) { return { width: w }; });
+  a3.columns = [13, 56, 7, 11, 8, 14, 15].map(function (w) { return { width: w }; });
   var ra = 1;
   analisisDe(p).forEach(function (aa) {
     var datos = (p.datosApu && p.datosApu[aa.apu]) || {};
@@ -334,7 +418,7 @@ function exportarTodo(p) {
     hd.getCell(1).border = { bottom: { style: "medium", color: { argb: LIME } } };
     hd.getCell(3).border = { bottom: { style: "medium", color: { argb: LIME } } };
     ra++;
-    a3.addRow(["Cant.", "Código", "Descripción", "Und", "Desp.", "Vr. unit", "Vr. total"]).eachCell(thd);
+    a3.addRow(["Código", "Descripción", "Und", "Cant.", "Desp.", "Vr. unit", "Vr. total"]).eachCell(thd);
     ra++;
 
     var seccion = function (titulo) {
@@ -344,11 +428,11 @@ function exportarTodo(p) {
       r.getCell(3).fill = fill(GRIS); ra++;
     };
     var linea = function (l) {
-      var r = a3.addRow([l.cantDesp, l.cod, l.desc, l.und, l.desp ? l.desp / 100 : null,
+      var r = a3.addRow([l.cod, l.desc, l.und, l.cantDesp, l.desp ? l.desp / 100 : null,
                          l.falta ? null : l.precio, l.falta ? null : l.total]);
       r.eachCell(function (cel, cn) {
         cel.font = { size: 9 }; cel.border = borde;
-        if (cn === 1) cel.numFmt = "#,##0.####";
+        if (cn === 4) cel.numFmt = "#,##0.####";
         if (cn === 5) cel.numFmt = "0%";
         if (cn >= 6) cel.numFmt = moneda;
       });
@@ -368,10 +452,11 @@ function exportarTodo(p) {
     subt("Subtotal materiales", val.mat);
     if (val.th > 0) {
       seccion("II · Transporte y herramienta");
-      var tr = a3.addRow([null, "TR1", "Transportes", "", val.pctTrans / 100, null, val.transporte]);
+      var tr = a3.addRow(["TR1", "Transportes", "", null, val.pctTrans / 100, null, val.transporte]);
       tr.getCell(5).numFmt = "0.##%"; tr.getCell(7).numFmt = moneda; tr.eachCell(function (c) { c.font = { size: 9 }; }); ra++;
-      var he = a3.addRow([null, "HER1", "Herramienta de mano", "", val.pctHerr / 100, null, val.herramienta]);
+      var he = a3.addRow(["HER1", "Herramienta de mano", "", null, val.pctHerr / 100, null, val.herramienta]);
       he.getCell(5).numFmt = "0.##%"; he.getCell(7).numFmt = moneda; he.eachCell(function (c) { c.font = { size: 9 }; }); ra++;
+      subt("Subtotal transporte y herramienta", val.th);
     }
     seccion("III · Mano de obra");
     val.lineas.filter(function (l) { return l.mo; }).forEach(linea);
@@ -431,15 +516,22 @@ function exportarTodoSimple(p) {
     ? ["ITEM", "DESCRIPCION", "UND", "CANT", "APU", "VR MATERIAL", "VR MANO OBRA", "TOTAL MAT", "TOTAL MO"]
     : ["ITEM", "DESCRIPCION", "UND", "CANT", "APU", "VR UNITARIO", "VR TOTAL"];
   var cot = [enc];
-  (p.hojas || []).forEach(function (h) {
-    if (!h.usar) return;
+  var hojas = Array.isArray(p.hojas) ? p.hojas : [];
+  hojas.forEach(function (h) {
+    if (!h || !h.usar) return;
     cot.push([h.nombre]);
-    h.filas.forEach(function (f) {
+    var filas = Array.isArray(h.filas) ? h.filas : [];
+    filas.forEach(function (f) {
+      if (!f) return;
       if (f.tipo === "cap") { cot.push([f.item, f.desc]); return; }
-      var a = t.porApu[f.apu] || {}; var q = Number(f.cant) || 0;
+      var apu = f.apu || null;
+      var a = apu && t.porApu ? (t.porApu[apu] || {}) : {};
+      var q = Number(f.cant) || 0;
+      var mat = Number(a.matConTh) || 0;
+      var mo = Number(a.mo) || 0;
       cot.push(sep
-        ? [f.item, f.desc, f.und, q, f.apu, a.matConTh || "", a.mo || "", a.matConTh ? a.matConTh * q : "", a.mo ? a.mo * q : ""]
-        : [f.item, f.desc, f.und, q, f.apu, a.unitario || "", a.unitario ? a.unitario * q : ""]);
+        ? [f.item, f.desc, f.und, q, apu || "", mat || "", mo || "", mat ? mat * q : "", mo ? mo * q : ""]
+        : [f.item, f.desc, f.und, q, apu || "", a.unitario || "", a.unitario ? a.unitario * q : ""]);
     });
   });
   var ws = XLSX.utils.aoa_to_sheet(cot);

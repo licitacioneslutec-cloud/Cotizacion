@@ -50,7 +50,7 @@ function renderCatalogo() {
         '<td style="text-align:center"><input class="in m indesp" type="number" min="0" max="50" step="1" ' +
           'data-cdesp="' + esc(i.cod) + '" value="' + (i.desp || "") + '" placeholder="0"></td>' +
         '<td style="text-align:center"><input type="checkbox" data-cimp="' + esc(i.cod) + '"' +
-          (i.imp ? " checked" : "") + ' title="Importado: lleva el IVA de importados"></td>' +
+          (i.imp ? " checked" : "") + ' title="Aplica IVA"></td>' +
         '<td style="font-size:12px;color:var(--ink3)">' + (i.act ? fecha(i.act.slice(0, 10)) : "—") + '</td>' +
       '</tr>';
 
@@ -122,7 +122,7 @@ function renderCatalogo() {
           '<th style="width:92px">Código</th><th>Descripción</th><th style="width:70px">Und</th>' +
           '<th style="width:106px" class="num">Precio costo</th>' +
           '<th style="width:56px;text-align:center" title="Desperdicio">Desp.</th>' +
-          '<th style="width:44px;text-align:center" title="Importado">Imp.</th>' +
+          '<th style="width:44px;text-align:center" title="Aplica IVA">IVA</th>' +
           '<th style="width:86px">Actualizado</th>' +
         '</tr></thead><tbody>' +
         filas + '</tbody></table></div>' +
@@ -183,7 +183,7 @@ function renderCatalogo() {
   var s = document.getElementById("solosin");
   if (s) s.onchange = function () { ir({ soloSin: this.checked, tope: 150 }); };
 
-  /* edición directa de precio, unidad e importado */
+  /* edición directa de precio, unidad e IVA */
   var editar = function (attr, aplica) {
     Array.prototype.forEach.call(document.querySelectorAll("[" + attr + "]"), function (el) {
       var accion = function () {
