@@ -672,6 +672,11 @@ function vArmado(p, r) {
   var cat = Catalogo.leer();
   var t = cat ? totalesProyecto(p, cat) : { porApu: {} };
   var sep = (p.forma || "junta") === "separada";
+  var mg = p.margenes || {};
+  var pA = (mg.admin || 0) / 100, pI = (mg.imprev || 0) / 100;
+  var pU = (mg.util || 0) / 100, pV = (mg.iva || 0) / 100;
+  var aiuTotal = pA + pI + pU + pU * pV;
+  var matItem = function (v) { return pV > 0 ? v * (1 + aiuTotal) / (1 + pV) : v * (1 + aiuTotal); };
   var verPct = !!vista.verPctMatMo;
   var verTot = vista.verTotales !== false; // default true
 
@@ -741,9 +746,10 @@ function vArmado(p, r) {
           '<td class="num">—</td>' + (verTot ? '<td class="num">—</td>' : '')
         : '<td class="num">—</td>' + (verTot ? '<td class="num">—</td>' : '');
     } else if (sep) {
+      var matU = a.matConTh ? matItem(a.matConTh) : 0;
       celPrecio =
-        '<td class="num pmat">' + (a.matConTh ? cop(a.matConTh) : "—") + '</td>' +
-        (verTot ? '<td class="num pmat">' + (a.matConTh ? cop(a.matConTh * qf) : "—") + '</td>' : '') +
+        '<td class="num pmat">' + (matU ? cop(matU) : "—") + '</td>' +
+        (verTot ? '<td class="num pmat">' + (matU ? cop(matU * qf) : "—") + '</td>' : '') +
         '<td class="num pmo">' + (a.mo ? cop(a.mo) : "—") + '</td>' +
         (verTot ? '<td class="num pmo">' + (a.mo ? cop(a.mo * qf) : "—") + '</td>' : '');
     } else {

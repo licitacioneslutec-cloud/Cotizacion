@@ -485,33 +485,14 @@ function panelApu(p, cat, act) {
         (val.sinPrecio ? '<div class="err" style="margin-bottom:13px">' + val.sinPrecio +
           (val.sinPrecio === 1 ? " insumo no tiene precio" : " insumos no tienen precio") +
           ' en el catálogo. El total de abajo está incompleto.</div>' : "") +
-        (function () {
-          var esSep = (p.forma || "junta") === "separada";
-          if (esSep) {
-            var mg = p.margenes || {};
-            var pA = (mg.admin || 0) / 100, pI = (mg.imprev || 0) / 100;
-            var pU = (mg.util || 0) / 100, pV = (mg.iva || 0) / 100;
-            var aiuT = pA + pI + pU + pU * pV;
-            var matDisp = pV > 0 ? val.matConTh * (1 + aiuT) / (1 + pV) : val.matConTh * (1 + aiuT);
-            var ivaMat = matDisp * pV;
-            var moDisp = val.mo * (1 + aiuT);
-            return '<div class="dl">' +
-              '<div class="dlr"><span class="dlk">Suministro</span><span class="dlv m">' + cop(matDisp) + '</span></div>' +
-              '<div class="dlr"><span class="dlk">IVA ' + (mg.iva || 0) + '%</span><span class="dlv m">' + cop(ivaMat) + '</span></div>' +
-              '<div class="dlr"><span class="dlk">Mano de obra</span><span class="dlv m">' + cop(moDisp) + '</span></div>' +
-              '<div class="dlr dltot"><span class="dlk">Costo directo</span>' +
-                '<span class="dlv m">' + cop(val.unitario) + '</span></div>' +
-            '</div>';
-          }
-          return '<div class="dl">' +
-            '<div class="dlr"><span class="dlk">Subtotal materiales</span><span class="dlv m">' + cop(val.mat) + '</span></div>' +
-            (val.th > 0 ? '<div class="dlr"><span class="dlk">Transporte y herramienta</span>' +
-              '<span class="dlv m">' + cop(val.th) + '</span></div>' : "") +
-            '<div class="dlr"><span class="dlk">Subtotal mano de obra</span><span class="dlv m">' + cop(val.mo) + '</span></div>' +
-            '<div class="dlr dltot"><span class="dlk">Costo directo</span>' +
-              '<span class="dlv m">' + cop(val.unitario) + '</span></div>' +
-          '</div>';
-        })() +
+        '<div class="dl">' +
+          '<div class="dlr"><span class="dlk">Subtotal materiales</span><span class="dlv m">' + cop(val.mat) + '</span></div>' +
+          (val.th > 0 ? '<div class="dlr"><span class="dlk">Transporte y herramienta</span>' +
+            '<span class="dlv m">' + cop(val.th) + '</span></div>' : "") +
+          '<div class="dlr"><span class="dlk">Subtotal mano de obra</span><span class="dlv m">' + cop(val.mo) + '</span></div>' +
+          '<div class="dlr dltot"><span class="dlk">Costo directo</span>' +
+            '<span class="dlv m">' + cop(val.unitario) + '</span></div>' +
+        '</div>' +
         '<div class="aporte">' + act.items.map(function (x) {
             return '<div class="dlr"><span class="dlk">' + esc(x.item) + ' · ' + fmt(x.cant) + ' ' + esc(x.und) +
               '</span><span class="dlv m">' + cop(val.unitario * (Number(x.cant) || 0)) + '</span></div>';
