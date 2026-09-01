@@ -34,13 +34,6 @@ var Sync = {
         }
       });
 
-      // Detectar proyectos eliminados en la nube
-      locales.forEach(function (pp) {
-        if (!proys[pp.id] && vista.pid !== pp.id) {
-          delete porId[pp.id];
-        }
-      });
-
       var lista = Object.keys(porId).map(function (k) { return porId[k]; });
       lista.sort(function (a, b) { return (b.modificado || "").localeCompare(a.modificado || ""); });
       _cacheProy = lista;
@@ -232,8 +225,11 @@ var Sync = {
         res.nProy = locales.length;
       }
 
-      /* ---- Plantillas: subir si la nube no tiene ---- */
-      if ((!plan || !plan.length) && Plantillas.leer().length) {
+      /* ---- Plantillas: bajar si la nube tiene más, subir si la nube no tiene ---- */
+      if (plan && plan.length) {
+        var lp = Plantillas.leer();
+        if (plan.length >= lp.length) Plantillas.guardar(plan);
+      } else if (Plantillas.leer().length) {
         Sync.subirPlantillas();
       }
 
