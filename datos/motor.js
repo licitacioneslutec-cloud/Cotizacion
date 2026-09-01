@@ -691,6 +691,14 @@ function ofertaDe(it, p) {
 }
 function costoDe(it, p) {
   if (!it) return 0;
+  if (p && p.congelarPrecios && p.preciosCongelados && p.preciosCongelados[it.cod]) {
+    var congelado = p.preciosCongelados[it.cod];
+    var idxProv = p.proveedores && p.proveedores[it.cod] !== undefined ? p.proveedores[it.cod] : (it.sel || 0);
+    if (congelado.ofertas && congelado.ofertas[idxProv] && congelado.ofertas[idxProv].precio > 0) {
+      return congelado.ofertas[idxProv].precio;
+    }
+    return congelado.precio || 0;
+  }
   var of = ofertaDe(it, p);
   if (of && Number(of.precio) > 0) return Number(of.precio);
   return Number(it.precio) || 0;

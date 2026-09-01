@@ -400,6 +400,9 @@ function vFicha(p, r) {
         '</div>' +
         '<div><label class="lbl" for="f-ent">Entrega de la oferta</label>' +
           '<input class="in m" type="date" id="f-ent" value="' + esc(p.entrega || "") + '"></div>' +
+        '<label class="lbl" style="margin-top:8px">' +
+          '<input type="checkbox" id="chkFreeze"' + (p.congelarPrecios ? " checked" : "") + '> ' +
+          'Congelar precios (no actualizar desde el catálogo)</label>' +
       '</div></div>' +
       '<div class="card"><div class="chd"><span class="ct">Anexo</span></div><div class="cbd">' +
         '<div class="file"><span>' + esc(p.archivo || "sin archivo") + '</span>' +
@@ -468,6 +471,26 @@ function enlazarFicha(p) {
     };
   });
   document.getElementById("f-ent").onchange = function () { p.entrega = this.value; guardar(); render(); };
+  var chkFreeze = document.getElementById("chkFreeze");
+  if (chkFreeze) chkFreeze.onchange = function () {
+    p.congelarPrecios = this.checked;
+    if (this.checked) {
+      var cat = Catalogo.leer();
+      if (cat && cat.items) {
+        p.preciosCongelados = {};
+        cat.items.forEach(function (it) {
+          p.preciosCongelados[it.cod] = {
+            precio: it.precio,
+            ofertas: it.ofertas ? JSON.parse(JSON.stringify(it.ofertas)) : null
+          };
+        });
+      }
+      Sync.crearSnapshot(p.id, "Auto: antes de congelar precios");
+    } else {
+      delete p.preciosCongelados;
+    }
+    guardar(); render();
+  };
   document.getElementById("f-cons").onblur = function () { p.consideraciones = this.value; guardar(); };
   Array.prototype.forEach.call(document.querySelectorAll("[data-mg]"), function (el) {
     el.oninput = function () { p.margenes[el.dataset.mg] = Number(el.value) || 0; guardar(); render(); };
