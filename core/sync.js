@@ -291,6 +291,53 @@ var Sync = {
     }).catch(function () { return null; });
   },
 
+  /* Snapshot congelado de un proyecto: copia completa bajo /snapshots/{proyId}/{timestamp} */
+  crearSnapshot: function (proyId, etiqueta) {
+    var proy = Store.leer(proyId);
+    if (!proy) return Promise.resolve(false);
+    var ts = new Date().toISOString().replace(/[:.]/g, "-");
+    var snapshot = {
+      fecha: new Date().toISOString(),
+      etiqueta: etiqueta || "Respaldo manual",
+      editor: Nube.yo || "desconocido",
+      datos: JSON.parse(JSON.stringify(proy))
+    };
+    delete snapshot.datos.baseModificado;
+    return Nube.escribir("snapshots/" + proyId + "/" + ts, snapshot)
+      .then(function () { return true; })
+      .catch(function () { return false; });
+  },
+  listarSnapshots: function (proyId) {
+    return Nube.leer("snapshots/" + proyId).then(function (data) {
+      if (!data) return [];
+      return Object.keys(data).map(function (ts) {
+        return { ts: ts, fecha: data[ts].fecha, etiqueta: data[ts].etiqueta, editor: data[ts].editor };
+      }).sort(function (a, b) { return b.fecha.localeCompare(a.fecha); });
+    }).catch(function () { return []; });
+  },
+  restaurarSnapshot: function (proyId, ts) {
+    return Nube.leer("snapshots/" + proyId + "/" + ts).then(function (snap) {
+      if (!snap || !snap.datos) return false;
+      var proy = snap.datos;
+      normalizarProyecto(proy);
+      proy.modificado = new Date().toISOString();
+      Store.guardar(proy);
+      return true;
+    }).catch(function () { return false; });
+  },
+  /* Baja un snapshot como archivo .json (no toca el proyecto local) */
+  descargarSnapshot: function (proyId, ts) {
+    return Nube.leer("snapshots/" + proyId + "/" + ts).then(function (snap) {
+      if (!snap || !snap.datos) return;
+      var blob = new Blob([JSON.stringify(snap, null, 2)], { type: "application/json" });
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "snapshot_" + (snap.datos.nombre || proyId) + "_" + snap.fecha.slice(0, 10) + ".json";
+      a.click();
+      URL.revokeObjectURL(a.href);
+    });
+  },
+
   marca: function (estado) {
     var el = document.getElementById("syncestado");
     if (!el) return;
