@@ -173,6 +173,7 @@ render();
 
 if (Sync.encendida()) {
   Sync.escucharCatalogo();
+  Sync.escucharProyectos();
   Sync.bajarTodo().then(function (res) {
     render();
     if (res && res.ok && (res.catalogo || res.nProy)) {

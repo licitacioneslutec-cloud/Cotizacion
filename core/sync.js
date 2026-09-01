@@ -11,8 +11,45 @@ var Sync = {
   pendProy: {}, timerProy: null, timerCat: null, ocupado: false,
   _listeners: {},
 
-  /* Placeholder: la Tarea 3 reemplaza esto con listeners en tiempo real (db.ref().on(...)). */
-  escucharProyectos: function () {},
+  /* Listener en tiempo real de la lista de proyectos: crear/eliminar/modificar se ve sin recargar. */
+  escucharProyectos: function () {
+    if (!db || Sync._listeners.proyectos) return;
+    Sync._listeners.proyectos = db.ref("proyectos").on("value", function (snap) {
+      var proys = snap.val();
+      if (!proys) return;
+      proys = transformarClaves(proys, decClaveFB);
+      var locales = Store.todos();
+      var porId = {};
+      locales.forEach(function (pp) { porId[pp.id] = pp; });
+
+      Object.keys(proys).forEach(function (id) {
+        var nube = proys[id];
+        if (!nube) return;
+        var loc = porId[id];
+        // No pisar el proyecto que el usuario tiene abierto y está editando
+        if (vista.pid === id) return;
+        if (!loc || (nube.modificado || "") > (loc.modificado || "")) {
+          normalizarProyecto(nube);
+          porId[id] = nube;
+        }
+      });
+
+      // Detectar proyectos eliminados en la nube
+      locales.forEach(function (pp) {
+        if (!proys[pp.id] && vista.pid !== pp.id) {
+          delete porId[pp.id];
+        }
+      });
+
+      var lista = Object.keys(porId).map(function (k) { return porId[k]; });
+      lista.sort(function (a, b) { return (b.modificado || "").localeCompare(a.modificado || ""); });
+      _cacheProy = lista;
+      try { localStorage.setItem(CLAVE, JSON.stringify(lista)); } catch (e) {}
+
+      if (vista.pantalla === "proyectos") render();
+      Sync.marca("ok");
+    });
+  },
 
   /* Listener en tiempo real del catálogo: empuja cada cambio a todos los equipos. */
   escucharCatalogo: function () {
