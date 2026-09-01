@@ -59,14 +59,17 @@ var Catalogo = {
     catch (e) { _cacheCat = null; }
     return _cacheCat;
   },
-  guardar: function (cat) {
+  /* indiceCambio: si se pasa (y >= 0), solo cambió ese ítem y se sube nada más él (PATCH).
+     Sin índice, se asume un cambio masivo (import, restauración) y se sube el catálogo entero. */
+  guardar: function (cat, indiceCambio) {
     cat.modificado = new Date().toISOString();
     _cacheCat = cat; _catLeido = true;
     _idxCat = null;
     var ok = true;
     try { localStorage.setItem(CLAVE_CAT, JSON.stringify(cat)); }
     catch (e) { ok = false; avisoError("No se pudo guardar el catálogo: el navegador se quedó sin espacio."); }
-    Sync.subirCatalogo();
+    if (indiceCambio !== undefined && indiceCambio >= 0) Sync.subirItem(indiceCambio, cat.items[indiceCambio]);
+    else Sync.subirCatalogo();
     return ok;
   },
   borrar: function () {

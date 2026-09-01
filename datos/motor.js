@@ -207,7 +207,7 @@ function fijarPrecio(p, cod, valor) {
     it.precio = n;
   }
   it.act = new Date().toISOString();
-  Catalogo.guardar(c);
+  Catalogo.guardar(c, i);
 }
 
 /* Busca un insumo primero entre los propios del proyecto, luego en el catálogo */

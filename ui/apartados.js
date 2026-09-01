@@ -788,7 +788,7 @@ function enlazarPanel(p) {
       var i = ix[el.dataset.desp];
       if (i === undefined) return;
       c.items[i].desp = Number(el.value) || 0;
-      Catalogo.guardar(c); refrescarPanel(p);
+      Catalogo.guardar(c, i); refrescarPanel(p);
     };
     el.onkeydown = function (e) { if (e.key === "Enter") { e.preventDefault(); el.blur(); } };
   });
@@ -984,7 +984,7 @@ function enlazarPanel(p) {
       var i = idx[c.dataset.imp];
       if (i === undefined) return;
       cat.items[i].imp = c.checked;
-      Catalogo.guardar(cat); refrescarPanel(p);
+      Catalogo.guardar(cat, i); refrescarPanel(p);
     };
   });
 

@@ -167,6 +167,18 @@ var Sync = {
         });
     }, 1800);
   },
+  /* Sube un solo ítem del catálogo (PATCH) en vez del catálogo entero (~1.2MB).
+     También empuja el timestamp del catálogo para que el listener de otros equipos vea el cambio. */
+  subirItem: function (indice, item) {
+    if (!Sync.encendida()) return;
+    var ref = Nube.ref("catalogo/items/" + indice);
+    if (!ref) return;
+    var limpio = JSON.parse(JSON.stringify(item, function (k, v) { return v === undefined ? null : v; }));
+    var seguro = transformarClaves(limpio, codClaveFB);
+    ref.set(seguro).then(function () { Sync.marca("ok"); }).catch(function () { Sync.marca("err"); });
+    var cat = Catalogo.leer();
+    if (cat) Nube.actualizar("catalogo", { modificado: cat.modificado }).catch(function () {});
+  },
   subirPlantillas: function () {
     if (!Sync.encendida()) return;
     Nube.escribir("plantillas", Plantillas.leer()).catch(function () {});

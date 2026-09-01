@@ -242,7 +242,7 @@ function enlazarInsumos(p) {
         if (i === undefined) return;
         aplica(c.items[i], el);
         c.items[i].act = new Date().toISOString();
-        Catalogo.guardar(c);
+        Catalogo.guardar(c, i);
         var y = window.scrollY; render(); window.scrollTo(0, y);
       };
       el.onkeydown = function (e) { if (e.key === "Enter") { e.preventDefault(); el.blur(); } };

@@ -193,7 +193,7 @@ function renderCatalogo() {
         if (i === undefined) return;
         aplica(c.items[i], el);
         c.items[i].act = new Date().toISOString();
-        Catalogo.guardar(c);
+        Catalogo.guardar(c, i);
         var cb = Catalogo.cobertura(c);
         var kv = document.querySelectorAll(".kv");
         if (kv.length >= 4) { kv[1].textContent = cb.con; kv[2].textContent = cb.sin; kv[3].textContent = cb.pct + "%"; }
@@ -235,7 +235,7 @@ function renderCatalogo() {
       var i = ix[q[0]];
       if (i === undefined) return;
       c.items[i].sel = Number(q[1]);
-      Catalogo.guardar(c);
+      Catalogo.guardar(c, i);
       var y = window.scrollY; render(); window.scrollTo(0, y);
     };
   });
@@ -250,7 +250,7 @@ function renderCatalogo() {
       if (!of) return;
       of[q[2]] = q[2] === "precio" ? (Number(el.value) || 0) : el.value;
       c.items[i].act = new Date().toISOString();
-      Catalogo.guardar(c);
+      Catalogo.guardar(c, i);
       var y = window.scrollY; render(); window.scrollTo(0, y);
     };
     el.onkeydown = function (e) { if (e.key === "Enter") { e.preventDefault(); el.blur(); } };
@@ -263,7 +263,7 @@ function renderCatalogo() {
       if (i === undefined || !c.items[i].ofertas) return;
       c.items[i].ofertas.splice(Number(q[1]), 1);
       if (c.items[i].sel >= c.items[i].ofertas.length) c.items[i].sel = 0;
-      Catalogo.guardar(c);
+      Catalogo.guardar(c, i);
       var y = window.scrollY; render(); window.scrollTo(0, y);
     };
   });
@@ -275,7 +275,7 @@ function renderCatalogo() {
       if (!c.items[i].ofertas) c.items[i].ofertas = [];
       c.items[i].ofertas.push({ marca: "", codAur: "", nombre: "", precio: 0, und: "", codCla: "", estado: "Activo" });
       if (c.items[i].sel === undefined) c.items[i].sel = 0;
-      Catalogo.guardar(c);
+      Catalogo.guardar(c, i);
       var y = window.scrollY; render(); window.scrollTo(0, y);
     };
   });
