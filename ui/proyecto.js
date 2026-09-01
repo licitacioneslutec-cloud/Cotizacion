@@ -441,6 +441,15 @@ function vFicha(p, r) {
       '<div class="ok" style="margin-top:13px">La rentabilidad y el IVA se montan sobre el precio de cada insumo: ' +
       'costo dividido entre uno menos el factor. Administración, imprevistos, utilidad e IVA van una sola vez ' +
       'sobre el subtotal.</div>' +
+    '</div></div>' +
+
+    '<div class="card" style="margin-top:12px"><div class="cbd">' +
+      '<div class="notet">Versiones guardadas</div>' +
+      '<div class="btnrow">' +
+        '<button class="btn" id="btnSnap">Guardar versión actual</button>' +
+        '<button class="btn" id="btnSnapList">Ver versiones</button>' +
+      '</div>' +
+      '<div id="snapLista"></div>' +
     '</div></div>';
 }
 
@@ -474,6 +483,47 @@ function enlazarFicha(p) {
     if (confirm("Se borra el proyecto de este navegador. ¿Seguir?")) {
       Store.borrar(p.id); ir({ pantalla: "proyectos" });
     }
+  };
+
+  var btnSnap = document.getElementById("btnSnap");
+  if (btnSnap) btnSnap.onclick = function () {
+    var etiqueta = prompt("Nombre para esta versión (opcional):", "");
+    Sync.crearSnapshot(p.id, etiqueta || "Versión " + new Date().toLocaleDateString()).then(function (ok) {
+      if (ok) avisoOk("Versión guardada.");
+      else avisoError("No se pudo guardar la versión.");
+    });
+  };
+
+  var btnList = document.getElementById("btnSnapList");
+  if (btnList) btnList.onclick = function () {
+    var div = document.getElementById("snapLista");
+    if (!div) return;
+    div.innerHTML = '<div class="note" style="margin:0"><div class="noteb">Cargando…</div></div>';
+    Sync.listarSnapshots(p.id).then(function (lista) {
+      if (!lista.length) { div.innerHTML = '<p>No hay versiones guardadas.</p>'; return; }
+      var html = '<div class="scroll"><table class="tbl"><tr><th>Fecha</th><th>Etiqueta</th><th>Editor</th><th></th></tr>';
+      lista.forEach(function (s) {
+        html += '<tr><td>' + esc(s.fecha.slice(0, 16).replace("T", " ")) + '</td>' +
+          '<td>' + esc(s.etiqueta || "") + '</td>' +
+          '<td>' + esc(s.editor || "") + '</td>' +
+          '<td><button class="btn btnmini" data-snaprest="' + esc(s.ts) + '">Restaurar</button> ' +
+          '<button class="btn btnmini" data-snapdl="' + esc(s.ts) + '">Descargar</button></td></tr>';
+      });
+      html += '</table></div>';
+      div.innerHTML = html;
+      Array.prototype.forEach.call(div.querySelectorAll("[data-snaprest]"), function (b) {
+        b.onclick = function () {
+          if (!confirm("Restaurar esta versión reemplaza el proyecto actual. ¿Continuar?")) return;
+          Sync.restaurarSnapshot(p.id, b.dataset.snaprest).then(function (ok) {
+            if (ok) { avisoOk("Proyecto restaurado."); render(); }
+            else avisoError("No se pudo restaurar.");
+          });
+        };
+      });
+      Array.prototype.forEach.call(div.querySelectorAll("[data-snapdl]"), function (b) {
+        b.onclick = function () { Sync.descargarSnapshot(p.id, b.dataset.snapdl); };
+      });
+    });
   };
 }
 
