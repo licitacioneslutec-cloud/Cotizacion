@@ -10,6 +10,9 @@
 var Sync = {
   pendProy: {}, timerProy: null, timerCat: null, ocupado: false,
 
+  /* Placeholder: la Tarea 3 reemplaza esto con listeners en tiempo real (db.ref().on(...)). */
+  escucharProyectos: function () {},
+
   encendida: function () {
     return Nube.activa && localStorage.getItem("apu.sync.on") !== "no";
   },

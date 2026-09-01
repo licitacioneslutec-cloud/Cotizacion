@@ -100,8 +100,21 @@ var Nube = {
   /* Prueba de conexión. */
   probar: function () {
     return Nube.leer(".info/connected").then(function () { return true; }).catch(function () { return false; });
+  },
+
+  /* Referencia del SDK, para listeners en tiempo real. */
+  ref: function (ruta) { return db.ref(ruta); },
+
+  /* Escritura parcial (PATCH): solo actualiza las claves dadas, no borra el resto del nodo. */
+  actualizar: function (ruta, datos) {
+    var limpio = JSON.parse(JSON.stringify(datos, function (k, v) { return v === undefined ? null : v; }));
+    var seguro = transformarClaves(limpio, codClaveFB);
+    return db.ref(ruta).update(seguro);
   }
 };
+
+firebase.initializeApp({ databaseURL: Nube.base });
+var db = firebase.database();
 
 var CLAVE = "apu.proyectos.v1";
 
