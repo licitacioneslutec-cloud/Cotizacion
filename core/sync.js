@@ -9,16 +9,57 @@
    ================================================================== */
 var Sync = {
   pendProy: {}, timerProy: null, timerCat: null, ocupado: false,
+  _listeners: {},
 
   /* Placeholder: la Tarea 3 reemplaza esto con listeners en tiempo real (db.ref().on(...)). */
   escucharProyectos: function () {},
+
+  /* Listener en tiempo real del catálogo: empuja cada cambio a todos los equipos. */
+  escucharCatalogo: function () {
+    if (!db || Sync._listeners.catalogo) return;
+    Sync._listeners.catalogo = db.ref("catalogo").on("value", function (snap) {
+      var cat = snap.val();
+      if (!cat || !cat.items) return;
+      cat = transformarClaves(cat, decClaveFB);
+      var local = Catalogo.leer();
+      var fNube = cat.modificado || "";
+      var fLoc = local && local.modificado ? local.modificado : "";
+      if (fNube > fLoc) {
+        _cacheCat = cat; _catLeido = true; _idxCat = null;
+        try { localStorage.setItem(CLAVE_CAT, JSON.stringify(cat)); } catch (e) {}
+        Sync.marca("ok");
+        if (vista.pantalla === "catalogo" || vista.pantalla === "precios" || vista.pantalla === "ofertas") {
+          render();
+        }
+      }
+    });
+  },
+
+  /* Apaga todos los listeners en tiempo real (catálogo + proyectos). */
+  detenerListeners: function () {
+    if (!db) return;
+    if (Sync._listeners.catalogo) {
+      db.ref("catalogo").off("value", Sync._listeners.catalogo);
+      Sync._listeners.catalogo = null;
+    }
+    if (Sync._listeners.proyectos) {
+      db.ref("proyectos").off("value", Sync._listeners.proyectos);
+      Sync._listeners.proyectos = null;
+    }
+  },
 
   encendida: function () {
     return Nube.activa && localStorage.getItem("apu.sync.on") !== "no";
   },
   prender: function (v) {
     localStorage.setItem("apu.sync.on", v ? "si" : "no");
-    if (v) Sync.bajarTodo();
+    if (v) {
+      Sync.escucharCatalogo();
+      Sync.escucharProyectos();
+      Sync.bajarTodo();
+    } else {
+      Sync.detenerListeners();
+    }
   },
 
   subirProyecto: function (proy) {
