@@ -195,7 +195,9 @@ var Sync = {
     Nube.escribir("plantillas", Plantillas.leer()).catch(function () {});
   },
 
-  /* Trae todo de la nube. Robusto: reporta qué trajo y siembra la nube si está vacía. */
+  /* Carga inicial / reconexión. Los listeners (escucharCatalogo/escucharProyectos) ya
+     mantienen todo al día en tiempo real; esto solo siembra la nube si está vacía y
+     sube lo que exista únicamente en local (catálogo, proyectos, plantillas). */
   bajarTodo: function () {
     if (!Sync.encendida()) return Promise.resolve({ ok: false });
     Sync.marca("sync");
@@ -212,52 +214,26 @@ var Sync = {
 
       var res = { ok: !fallo, catalogo: false, nProy: 0, sembrado: false };
 
-      /* ---- Catálogo ---- */
+      /* ---- Catálogo: sembrar la nube si está vacía ---- */
       var local = Catalogo.leer();
-      if (cat && cat.items && cat.items.length) {
-        var fNube = cat.modificado || "";
-        var fLoc = local && local.modificado ? local.modificado : "";
-        /* La nube gana salvo que lo local sea estrictamente más nuevo */
-        if (!local || fNube >= fLoc) {
-          _cacheCat = cat; _catLeido = true; _idxCat = null;
-          try { localStorage.setItem(CLAVE_CAT, JSON.stringify(cat)); } catch (e) {}
-          res.catalogo = true;
-        } else {
-          Sync.subirCatalogo();  /* lo local es más nuevo: se sube */
-        }
-      } else if (local && local.items && local.items.length) {
-        /* La nube no tiene catálogo: se siembra con el local */
+      if ((!cat || !cat.items || !cat.items.length) && local && local.items && local.items.length) {
         Nube.escribir("catalogo", local).then(function () { Sync.marca("ok"); }).catch(function () {});
         res.sembrado = true;
       }
+      res.catalogo = !!(cat && cat.items && cat.items.length);
 
-      /* ---- Proyectos ---- */
+      /* ---- Proyectos: subir los que solo existen en local ---- */
       var locales = Store.todos();
-      var porId = {};
-      locales.forEach(function (pp) { porId[pp.id] = pp; });
       if (proys) {
-        Object.keys(proys).forEach(function (id) {
-          var nube = proys[id];
-          if (!nube) return;
-          var loc = porId[id];
-          if (!loc || (nube.modificado || "") >= (loc.modificado || "")) porId[id] = nube;
-        });
-        /* subir los que solo existen en local */
         locales.forEach(function (pp) { if (!proys[pp.id]) Sync.subirProyecto(pp); });
+        res.nProy = Object.keys(proys).length;
       } else if (locales.length) {
         locales.forEach(function (pp) { Sync.subirProyecto(pp); });
+        res.nProy = locales.length;
       }
-      var lista = Object.keys(porId).map(function (k) { return normalizarProyecto(porId[k]); });
-      lista.sort(function (a, b) { return (b.modificado || "").localeCompare(a.modificado || ""); });
-      _cacheProy = lista;
-      try { localStorage.setItem(CLAVE, JSON.stringify(lista)); } catch (e) {}
-      res.nProy = lista.length;
 
-      /* ---- Plantillas ---- */
-      if (plan && plan.length) {
-        var lp = Plantillas.leer();
-        if (plan.length >= lp.length) Plantillas.guardar(plan);
-      } else if (Plantillas.leer().length) {
+      /* ---- Plantillas: subir si la nube no tiene ---- */
+      if ((!plan || !plan.length) && Plantillas.leer().length) {
         Sync.subirPlantillas();
       }
 
