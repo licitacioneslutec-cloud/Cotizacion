@@ -62,6 +62,17 @@ var Sync = {
       var fNube = cat.modificado || "";
       var fLoc = local && local.modificado ? local.modificado : "";
       if (fNube > fLoc) {
+        // Auto-snapshot de proyectos no congelados que usarían los precios nuevos (máx. 1 vez por día)
+        var hoy = new Date().toISOString().slice(0, 10);
+        var ultimoAutoSnap = localStorage.getItem("apu.lastAutoSnap") || "";
+        if (hoy !== ultimoAutoSnap) {
+          localStorage.setItem("apu.lastAutoSnap", hoy);
+          Store.todos().forEach(function (pp) {
+            if (!pp.congelarPrecios) {
+              Sync.crearSnapshot(pp.id, "Auto: catálogo " + hoy).catch(function () {});
+            }
+          });
+        }
         _cacheCat = cat; _catLeido = true; _idxCat = null;
         try { localStorage.setItem(CLAVE_CAT, JSON.stringify(cat)); } catch (e) {}
         Sync.marca("ok");
