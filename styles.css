@@ -132,7 +132,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;}
 .an{display:flex;justify-content:space-between;gap:8px;align-items:baseline;}
 .anum{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--ink3);}
 .ad{font-size:12.5px;color:var(--ink);margin-top:2px;overflow:hidden;text-overflow:ellipsis;
-  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
+  white-space:nowrap;max-width:100%;}
 .pt{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--lime);vertical-align:middle;}
 
 .bloque{border:1px solid var(--line);border-radius:5px;padding:12px 13px;margin-bottom:11px;}
@@ -163,6 +163,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px;}
 .itemnuevo{border-left:3px solid var(--lime);padding-left:11px;margin-top:9px;}
 .aporte{margin-top:13px;padding-top:12px;border-top:1px dashed var(--line);}
 .aporte .dlk{font-size:12px;}
+.resitem:hover{background:var(--paper);}
 
 /* ---- marca ---- */
 .marca{display:flex;align-items:center;gap:15px;}

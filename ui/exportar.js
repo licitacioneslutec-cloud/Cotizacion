@@ -116,7 +116,7 @@ function imprimirPropuesta(p) {
     var val = valorizar(cat, comp.lineas, margenesDe(p, a.apu), p);
     var fl = function (l) {
       return '<tr><td class="c">' + esc(l.cod) + '</td><td>' + esc(l.desc) + '</td>' +
-        '<td class="c">' + esc(l.und) + '</td><td class="n">' + dec(l.cantDesp) + '</td>' +
+        '<td class="c">' + esc(l.und) + '</td><td class="n">' + dec(l.cant) + '</td>' +
         '<td class="n">' + (l.desp ? l.desp + "%" : "") + '</td>' +
         '<td class="n">' + (l.falta ? "—" : cop(l.precio)) + '</td>' +
         '<td class="n">' + (l.falta ? "—" : cop(l.total)) + '</td></tr>';
@@ -224,6 +224,33 @@ function exportarTodo(p) {
   var moneda = '"$"#,##0';
   var wb = new ExcelJS.Workbook();
   wb.creator = "Lutec"; wb.created = new Date();
+  var insItems = insumosDe(p, cat);
+  var insRow = {};
+  insItems.forEach(function (it, idx) { insRow[it.cod] = idx + 2; });
+
+  // Cotización (built first) needs to link to each APU's COSTO DIRECTO cell on
+  // the Análisis sheet (built after). Walk the same row-count logic ahead of
+  // time to know those row numbers, caching val so Análisis doesn't recompute.
+  // ponytail: row math here must stay in sync with the real writer loop below;
+  // upgrade to a shared row-layout function if they ever drift.
+  var apuDirectoRow = {};
+  var analisisCache = {};
+  (function () {
+    var raP = 1;
+    analisisDe(p).forEach(function (aa) {
+      var datos = (p.datosApu && p.datosApu[aa.apu]) || {};
+      var comp = componerAnalisis(cat, datos, p, aa.apu);
+      var val = valorizar(cat, comp.lineas, margenesDe(p, aa.apu), p);
+      analisisCache[aa.apu] = val;
+      raP += 2; // title row + column-header row
+      raP += 1 + val.lineas.filter(function (l) { return !l.mo; }).length + 1; // seccion + materiales + subtotal
+      if (val.th > 0) raP += 1 + 2 + 1; // seccion + TR1/HER1 + subtotal
+      raP += 1 + val.lineas.filter(function (l) { return l.mo; }).length + 1; // seccion + mano de obra + subtotal
+      raP += 1; // COSTO DIRECTO row
+      apuDirectoRow[aa.apu] = raP - 1;
+      raP += 1; // blank separator row
+    });
+  })();
 
   var borde = { top: { style: "thin", color: { argb: "FFDDE3E8" } },
                 bottom: { style: "thin", color: { argb: "FFDDE3E8" } },
@@ -359,10 +386,20 @@ function exportarTodo(p) {
       var matU = sep ? matItem(Number(a.matConTh) || 0) : null;
       var matT = matU !== null ? matU * q : null;
       var moU = Number(a.mo) || 0;
-      var r = sep
-        ? c2.addRow([apu || "", f.item, f.desc, f.und, q, matU, matT,
-            moU || null, moU ? moU * q : null, nota || null])
-        : c2.addRow([apu || "", f.item, f.desc, f.und, q, a.unitario || null, a.unitario ? a.unitario * q : null, nota || null]);
+      var moT = moU ? moU * q : null;
+      var tieneApu = apu && apuDirectoRow[apu];
+      var r;
+      if (sep) {
+        var matCell = matU, moCell = moU || null;
+        var matTCell = tieneApu ? { formula: "F" + rc + "*E" + rc, result: matT || 0 } : matT;
+        var moTCell = tieneApu ? { formula: "H" + rc + "*E" + rc, result: moT || 0 } : moT;
+        r = c2.addRow([apu || "", f.item, f.desc, f.und, q, matCell, matTCell,
+            moCell, moTCell, nota || null]);
+      } else {
+        var unitFormula = tieneApu ? { formula: "'Análisis'!G" + apuDirectoRow[apu], result: a.unitario || 0 } : (a.unitario || null);
+        var totalFormula = tieneApu ? { formula: "F" + rc + "*E" + rc, result: (a.unitario || 0) * q } : (a.unitario ? a.unitario * q : null);
+        r = c2.addRow([apu || "", f.item, f.desc, f.und, q, unitFormula, totalFormula, nota || null]);
+      }
       r.eachCell(function (cel, cn) {
         cel.border = borde; cel.font = { size: 9 };
         if (cn >= 6 && cn <= (sep ? 9 : 7)) cel.numFmt = moneda;
@@ -374,6 +411,7 @@ function exportarTodo(p) {
       rc++;
     });
   });
+  var cotDataEnd = rc - 1;
   c2.addRow([]); rc++;
   var totCot = function (k, v, col) {
     var arr = new Array(sep ? 10 : 8).fill(null);
@@ -406,9 +444,7 @@ function exportarTodo(p) {
   a3.columns = [13, 56, 7, 11, 8, 14, 15].map(function (w) { return { width: w }; });
   var ra = 1;
   analisisDe(p).forEach(function (aa) {
-    var datos = (p.datosApu && p.datosApu[aa.apu]) || {};
-    var comp = componerAnalisis(cat, datos, p, aa.apu);
-    var val = valorizar(cat, comp.lineas, margenesDe(p, aa.apu), p);
+    var val = analisisCache[aa.apu];
 
     var hd = a3.addRow(["APU " + aa.apu, aa.items.map(function (x) { return x.item; }).join(", "),
                         aa.items[0] ? aa.items[0].desc : ""]);
@@ -421,15 +457,26 @@ function exportarTodo(p) {
     a3.addRow(["Código", "Descripción", "Und", "Cant.", "Desp.", "Vr. unit", "Vr. total"]).eachCell(thd);
     ra++;
 
+    var secStart = ra + 1;
+    var matSubtRow = 0, thSubtRow = 0, moSubtRow = 0;
     var seccion = function (titulo) {
       var r = a3.addRow(["", "", titulo]);
       a3.mergeCells("C" + ra + ":G" + ra);
       r.getCell(3).font = { bold: true, size: 9, color: { argb: "FF5A6B7B" } };
       r.getCell(3).fill = fill(GRIS); ra++;
+      secStart = ra;
     };
     var linea = function (l) {
-      var r = a3.addRow([l.cod, l.desc, l.und, l.cantDesp, l.desp ? l.desp / 100 : null,
-                         l.falta ? null : l.precio, l.falta ? null : l.total]);
+      var precioVal = l.falta ? null : l.precio;
+      var totalVal = l.falta ? null : l.total;
+      var precioCell = precioVal;
+      var totalCell = totalVal;
+      if (!l.falta && insRow[l.cod]) {
+        precioCell = { formula: "Insumos!$F$" + insRow[l.cod], result: precioVal || 0 };
+        totalCell = { formula: "D" + ra + "*(1+E" + ra + ")*F" + ra, result: totalVal || 0 };
+      }
+      var r = a3.addRow([l.cod, l.desc, l.und, l.cant, l.desp ? l.desp / 100 : null,
+                         precioCell, totalCell]);
       r.eachCell(function (cel, cn) {
         cel.font = { size: 9 }; cel.border = borde;
         if (cn === 4) cel.numFmt = "#,##0.####";
@@ -439,17 +486,20 @@ function exportarTodo(p) {
       ra++;
     };
     var subt = function (k, v) {
-      var r = a3.addRow(["", "", k, "", "", "", v]);
+      var formulaG = secStart < ra ? { formula: "SUM(G" + secStart + ":G" + (ra - 1) + ")", result: v || 0 } : (v || null);
+      var r = a3.addRow(["", "", k, "", "", "", formulaG]);
       a3.mergeCells("C" + ra + ":F" + ra);
       r.getCell(3).font = { bold: true, size: 9 }; r.getCell(7).numFmt = moneda;
       r.getCell(7).font = { bold: true, size: 9 };
       r.eachCell(function (cel) { cel.fill = fill(GRIS2); });
       ra++;
+      secStart = ra;
     };
 
     seccion("I · Materiales");
     val.lineas.filter(function (l) { return !l.mo; }).forEach(linea);
     subt("Subtotal materiales", val.mat);
+    matSubtRow = ra - 1;
     if (val.th > 0) {
       seccion("II · Transporte y herramienta");
       var tr = a3.addRow(["TR1", "Transportes", "", null, val.pctTrans / 100, null, val.transporte]);
@@ -457,16 +507,20 @@ function exportarTodo(p) {
       var he = a3.addRow(["HER1", "Herramienta de mano", "", null, val.pctHerr / 100, null, val.herramienta]);
       he.getCell(5).numFmt = "0.##%"; he.getCell(7).numFmt = moneda; he.eachCell(function (c) { c.font = { size: 9 }; }); ra++;
       subt("Subtotal transporte y herramienta", val.th);
+      thSubtRow = ra - 1;
     }
     seccion("III · Mano de obra");
     val.lineas.filter(function (l) { return l.mo; }).forEach(linea);
     subt("Subtotal mano de obra", val.mo);
+    moSubtRow = ra - 1;
 
-    var dr = a3.addRow(["", "", "COSTO DIRECTO", "", "", "", val.directo]);
+    var directoFormula = "G" + matSubtRow + (thSubtRow ? "+G" + thSubtRow : "") + "+G" + moSubtRow;
+    var dr = a3.addRow(["", "", "COSTO DIRECTO", "", "", "", { formula: directoFormula, result: val.directo || 0 }]);
     a3.mergeCells("C" + ra + ":F" + ra);
     dr.getCell(3).font = { bold: true, color: { argb: NAVY } };
     dr.getCell(7).numFmt = moneda; dr.getCell(7).font = { bold: true, color: { argb: NAVY } };
     dr.eachCell(function (cel) { cel.fill = fill(GRIS); }); ra++;
+    apuDirectoRow[aa.apu] = ra - 1;
     a3.addRow([]); ra++;
   });
 

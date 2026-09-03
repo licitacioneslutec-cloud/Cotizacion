@@ -223,6 +223,14 @@ function renderNuevo() {
         '</div></div>' +
         '<button class="btn btnp" id="crear" style="width:100%"' + (listo ? "" : " disabled") + '>' +
           'Crear proyecto y leer el anexo</button>' +
+        (b.hojas ? "" :
+          '<div class="card" style="margin-top:12px"><div class="cbd">' +
+            '<div class="notet">¿No tienes el anexo del cliente?</div>' +
+            '<div class="btnrow" style="margin-top:8px">' +
+              '<button class="btn" id="blanco">Crear proyecto en blanco</button>' +
+              '<button class="btn" id="plantilla">Descargar plantilla</button>' +
+            '</div>' +
+          '</div></div>') +
       '</div>' +
     '</div></main>';
 
@@ -273,6 +281,51 @@ function renderNuevo() {
     };
     Store.guardar(p);
     ir({ pantalla: "proyecto", pid: p.id, paso: "anexo", hoja: 0, sel: [] });
+  };
+
+  var blancoBtn = document.getElementById("blanco");
+  if (blancoBtn) blancoBtn.onclick = function () {
+    recoger();
+    if (!b.nombre.trim()) { avisoError("Escribe un nombre para el proyecto antes de crearlo en blanco."); return; }
+    var p = {
+      id: id(), nombre: b.nombre.trim(), cliente: b.cliente, ciudad: b.ciudad,
+      recibo: b.recibo, entrega: b.entrega, archivo: "",
+      hojas: [{ nombre: "Hoja 1", ok: true, encabezado: 0, mapa: {}, columnas: [],
+                filas: [], usar: true, crudas: [], descartadas: 0 }],
+      constructora: b.constructora || "", encargado: b.encargado || "",
+      entregaObs: b.entregaObs || "", tipo: b.tipo || "", check: {},
+      consideraciones: "", costoDirecto: 0,
+      margenes: { rent: 10, dolar: 19, admin: 8, imprev: 2, util: 5, iva: 19, transporte: 1, herramienta: 2 },
+      forma: "junta",
+      creado: new Date().toISOString()
+    };
+    Store.guardar(p);
+    ir({ pantalla: "proyecto", pid: p.id, paso: "armado", hoja: 0, sel: [] });
+  };
+
+  var plantillaBtn = document.getElementById("plantilla");
+  if (plantillaBtn) plantillaBtn.onclick = function () {
+    var wb = new ExcelJS.Workbook();
+    var ws = wb.addWorksheet("Hoja 1");
+    ws.getRow(1).values = ["ITEM", "DESCRIPCIÓN", "UNIDAD", "CANTIDAD"];
+    ws.getColumn(1).width = 12;
+    ws.getColumn(2).width = 50;
+    ws.getColumn(3).width = 10;
+    ws.getColumn(4).width = 12;
+    ws.getRow(1).eachCell(function (cell) {
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0F2436" } };
+    });
+    ws.getRow(2).values = ["1", "CAPÍTULO EJEMPLO", "", ""];
+    ws.getRow(3).values = ["1.1", "Descripción del ítem ejemplo", "UN", 1];
+    ws.getRow(4).values = ["1.2", "Otro ítem de ejemplo", "ML", 10];
+    wb.xlsx.writeBuffer().then(function (buffer) {
+      var blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "Plantilla_Cotizacion.xlsx";
+      a.click(); URL.revokeObjectURL(a.href);
+    });
   };
 }
 
@@ -765,18 +818,20 @@ function vArmado(p, r) {
   }
 
   var filtro = (vista.filtroArmado || "").toLowerCase();
+  var filtroApu = (vista.filtroArmadoApu || "").trim();
 
   /* Cuántos ítems comparten cada análisis, en todo el proyecto */
   var cuenta = {};
   itemsDe(p).forEach(function (x) { if (x.f.apu) cuenta[x.f.apu] = (cuenta[x.f.apu] || 0) + 1; });
 
   var extraCols = (verPct ? 2 : 0) + (sep ? (verTot ? 4 : 2) : (verTot ? 2 : 1));
-  var colspan = 7 + extraCols;
+  var colspan = 7 + extraCols + 1;
   var cuerpo = "", capPend = null, visibles = 0;
   h.filas.forEach(function (f, fi) {
     if (f.tipo === "cap") { capPend = f; return; }
     if (filtro && (f.desc || "").toLowerCase().indexOf(filtro) < 0 &&
         (f.item || "").toLowerCase().indexOf(filtro) < 0) return;
+    if (filtroApu && String(f.apu || "").indexOf(filtroApu) < 0) return;
     if (capPend && !filtro) {
       cuerpo += '<tr class="caprow"><td colspan="' + colspan + '">' + esc(capPend.item) + ' · ' + esc(capPend.desc) + '</td></tr>';
       capPend = null;
@@ -834,14 +889,19 @@ function vArmado(p, r) {
     cuerpo += '<tr class="itrow' + (marcada ? " sel" : "") + '" data-fila="' + k + '">' +
       '<td style="text-align:center"><input type="checkbox" data-sel="' + k + '"' + (marcada ? " checked" : "") +
         ' aria-label="Elegir ítem ' + esc(f.item) + '"></td>' +
-      '<td class="m" style="font-size:12px;color:var(--ink2)">' + esc(f.item) + '</td>' +
-      '<td>' + esc(f.desc) + '</td>' +
+      '<td class="m" style="font-size:12px;color:var(--ink2)">' +
+        (f.manual ? '<input class="in m" style="font-size:12px;width:50px" data-edititem="' + k + '" value="' + esc(f.item) + '">'
+                   : esc(f.item)) + '</td>' +
+      '<td>' + (f.manual ? '<input class="in" style="width:100%" data-editdesc="' + k + '" value="' + esc(f.desc) + '">' : esc(f.desc)) + '</td>' +
       '<td style="color:var(--ink2)">' + esc(f.und) + '</td>' +
       '<td class="num">' + fmt(f.cant) + '</td>' +
+      '<td><input class="in m" style="font-size:11px" data-cantobs="' + k + '" value="' + esc(f.cantObs || "") + '" placeholder="—"></td>' +
       '<td class="celtog">' + togs + '</td>' +
       '<td' + tie + '><div class="apu' + (comparte ? " apudup" : "") + '">' +
         '<input class="in m inapu" data-apunum="' + k + '" value="' + (f.apu || "") +
-          '" placeholder="—" title="Escribe un número para asignar o unir análisis"></div></td>' +
+          '" placeholder="—" title="Escribe un número para asignar o unir análisis">' +
+        (f.apu ? '<button class="btnx" data-irapu="' + f.apu + '" title="Ir al análisis ' + f.apu + '" style="font-size:10px;padding:0 4px;margin-left:2px">→</button>' : '') +
+        '</div></td>' +
       celPct + celPrecio +
     '</tr>';
   });
@@ -883,14 +943,19 @@ function vArmado(p, r) {
         '</div>' +
         '<input class="in infiltro" id="filtroarmado" placeholder="Filtrar por descripción o ítem" value="' +
           esc(vista.filtroArmado || "") + '">' +
+        '<input class="in infiltro" id="filtroapuarmado" placeholder="Filtrar por nº de análisis" value="' +
+          esc(vista.filtroArmadoApu || "") + '" style="margin-left:8px;max-width:200px">' +
       '</div>' +
       '<div class="scroll"><table class="tbl tblarmado"><thead><tr>' +
         '<th style="width:34px"><span class="sr">Elegir</span></th>' +
         '<th style="width:58px">Ítem</th><th>Descripción</th>' +
         '<th style="width:38px">Und</th><th style="width:56px" class="num">Cant.</th>' +
+        '<th style="width:80px">Cant. OBS</th>' +
         '<th style="width:210px">Apartados</th><th style="width:54px;text-align:center">Análisis</th>' +
         encPct + encPrecio +
       '</tr></thead><tbody>' + cuerpo + '</tbody></table></div>' + barra +
+      '<div class="btnrow" style="margin:12px 0"><button class="btn" id="agregarItem">+ Agregar ítem</button>' +
+        '<button class="btn" id="agregarCap" style="margin-left:8px">+ Agregar capítulo</button></div>' +
     '</div>' +
     '<div class="note"><div class="notet">Cómo se usa</div>' +
     '<div class="noteb">Toca una sigla para decir a qué apartado va el ítem. Escribe el mismo número de ' +
@@ -907,6 +972,14 @@ function enlazarArmado(p) {
     var n = document.getElementById("filtroarmado");
     if (n) { n.focus(); n.setSelectionRange(pos, pos); }
   };
+  var ffApu = document.getElementById("filtroapuarmado");
+  if (ffApu) ffApu.oninput = function () {
+    vista.filtroArmadoApu = this.value;
+    var pos = this.selectionStart, y = window.scrollY;
+    render(); window.scrollTo(0, y);
+    var n = document.getElementById("filtroapuarmado");
+    if (n) { n.focus(); n.setSelectionRange(pos, pos); }
+  };
   var tp = document.getElementById("togpct");
   if (tp) tp.onchange = function () { vista.verPctMatMo = this.checked; var y = window.scrollY; render(); window.scrollTo(0, y); };
   var tt = document.getElementById("togtot");
@@ -916,7 +989,8 @@ function enlazarArmado(p) {
   });
   Array.prototype.forEach.call(document.querySelectorAll("[data-fila]"), function (tr) {
     tr.onclick = function (e) {
-      if (e.target.closest(".tog") || e.target.closest(".inapu") || e.target.matches("[data-sel]")) return;
+      if (e.target.closest(".tog") || e.target.closest(".inapu") || e.target.matches("[data-sel]") ||
+          e.target.closest("[data-cantobs]") || e.target.closest("[data-edititem]") || e.target.closest("[data-editdesc]")) return;
       var k = tr.dataset.fila, i = vista.sel.indexOf(k);
       if (i >= 0) vista.sel.splice(i, 1); else vista.sel.push(k);
       render();
@@ -958,6 +1032,51 @@ function enlazarArmado(p) {
       Store.guardar(p); render();
     };
   });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-cantobs]"), function (el) {
+    el.onchange = function () {
+      var q = el.dataset.cantobs.split(":");
+      var f = p.hojas[Number(q[0])].filas[Number(q[1])];
+      if (f) { f.cantObs = el.value; Store.guardar(p); }
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-irapu]"), function (b) {
+    b.onclick = function (e) {
+      e.stopPropagation();
+      ir({ paso: "apartados", apu: Number(b.dataset.irapu) });
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-edititem]"), function (el) {
+    el.onchange = function () {
+      var q = el.dataset.edititem.split(":");
+      var f = p.hojas[Number(q[0])].filas[Number(q[1])];
+      if (f) { f.item = el.value; Store.guardar(p); }
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-editdesc]"), function (el) {
+    el.onchange = function () {
+      var q = el.dataset.editdesc.split(":");
+      var f = p.hojas[Number(q[0])].filas[Number(q[1])];
+      if (f) { f.desc = el.value; Store.guardar(p); }
+    };
+  });
+  var btnItem = document.getElementById("agregarItem");
+  if (btnItem) btnItem.onclick = function () {
+    var h = p.hojas[vista.hoja];
+    if (!h) return;
+    h.filas.push({ tipo: "it", item: "", desc: "", und: "UN", cant: 1, cod: [], apu: null, cantObs: "", manual: true });
+    Store.guardar(p);
+    render();
+  };
+  var btnCap = document.getElementById("agregarCap");
+  if (btnCap) btnCap.onclick = function () {
+    var h = p.hojas[vista.hoja];
+    if (!h) return;
+    var nombre = prompt("Nombre del capítulo:");
+    if (!nombre) return;
+    h.filas.push({ tipo: "cap", item: "", desc: nombre });
+    Store.guardar(p);
+    render();
+  };
 
   function seleccionadas() {
     return vista.sel.map(function (k) {

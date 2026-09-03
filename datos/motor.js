@@ -195,19 +195,9 @@ function registrarPropio(p, fila) {
 function fijarPrecio(p, cod, valor) {
   var n = Number(valor) || 0;
   if (p.propios && p.propios[cod]) { p.propios[cod].precio = n; Store.guardar(p); return; }
-  var c = Catalogo.leer();
-  var i = Catalogo.indice(c)[cod];
-  if (i === undefined) return;
-  var it = c.items[i];
-  if (it.ofertas && it.ofertas.length) {
-    var j = (p.proveedores && p.proveedores[cod] !== undefined)
-      ? p.proveedores[cod] : (it.sel !== undefined ? it.sel : 0);
-    if (it.ofertas[j]) it.ofertas[j].precio = n;
-  } else {
-    it.precio = n;
-  }
-  it.act = new Date().toISOString();
-  Catalogo.guardar(c, i);
+  if (!p.preciosLocales) p.preciosLocales = {};
+  p.preciosLocales[cod] = n;
+  Store.guardar(p);
 }
 
 /* Busca un insumo primero entre los propios del proyecto, luego en el catálogo */
@@ -647,6 +637,14 @@ function componerAnalisis(cat, datos, p, apu) {
     lineas = lineas.concat(r.lineas);
   });
 
+  /* Insumos del catálogo agregados a mano desde el buscador */
+  ((datos && datos.extra) || []).forEach(function (fila) {
+    lineas.push({
+      cant: Number(fila.cant) || 0, cod: codClave(fila.cod),
+      desc: fila.desc, und: fila.und
+    });
+  });
+
   /* Se suman las líneas repetidas del mismo código */
   var mapa = {}, orden = [];
   lineas.forEach(function (l) {
@@ -698,6 +696,9 @@ function costoDe(it, p) {
       return congelado.ofertas[idxProv].precio;
     }
     return congelado.precio || 0;
+  }
+  if (!it.propio && p && p.preciosLocales && p.preciosLocales[it.cod] !== undefined) {
+    return p.preciosLocales[it.cod];
   }
   var of = ofertaDe(it, p);
   if (of && Number(of.precio) > 0) return Number(of.precio);

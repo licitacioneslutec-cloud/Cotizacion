@@ -17,7 +17,7 @@ var HOJAS_COMP = [
 /* Convierte una hoja en registros usando su primera fila como encabezado */
 function hojaARegistros(wb, nombre) {
   var filas = XLSX.utils.sheet_to_json(wb.Sheets[nombre], {
-    header: 1, raw: false, defval: null, blankrows: false
+    header: 1, raw: true, defval: null, blankrows: false
   });
   if (!filas.length) return [];
   var enc = (filas[0] || []).map(function (v) { return txt(v); });

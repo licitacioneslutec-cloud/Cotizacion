@@ -141,6 +141,10 @@ function vInsumos(p) {
           '<button class="btn btnmini" id="rentnone">Quitar Rent. a todos</button>' +
           '<span class="pctnota" style="min-width:0">IVA: ' + impCount + '/' + impTot + ' · Rent: ' + rentCount + '/' + rentTot + '</span>' +
         '</div>' +
+        '<div class="btnrow" style="margin-top:6px;flex-wrap:wrap;gap:6px">' +
+          '<button class="btn" id="traerPrecios">Traer precios desde el catálogo</button>' +
+          '<button class="btn" id="enviarPrecios">Enviar precios al catálogo</button>' +
+        '</div>' +
       '</div>' +
       '<div class="scroll"><table class="tbl"><thead><tr>' +
         '<th style="width:96px">Código</th><th>Descripción</th><th style="width:52px">Und</th>' +
@@ -267,6 +271,57 @@ function enlazarInsumos(p) {
   });
   editar("data-iimp", function (it, el) { it.imp = el.checked; });
   editar("data-irent", function (it, el) { it.rent = el.checked; });
+
+  var btnTraer = document.getElementById("traerPrecios");
+  if (btnTraer) btnTraer.onclick = function () {
+    var cat = Catalogo.leer();
+    if (!cat) { avisoError("No hay catálogo cargado."); return; }
+    var idx = Catalogo.indice(cat);
+    var items = insumosDe(p, cat);
+    var n = 0;
+    if (!p.preciosLocales) p.preciosLocales = {};
+    items.forEach(function (it) {
+      var i = idx[it.cod];
+      if (i !== undefined) {
+        var catIt = cat.items[i];
+        var precio = Number(catIt.precio) || 0;
+        if (catIt.ofertas && catIt.ofertas.length) {
+          var j = (p.proveedores && p.proveedores[it.cod] !== undefined) ? p.proveedores[it.cod] : (catIt.sel !== undefined ? catIt.sel : 0);
+          if (catIt.ofertas[j]) precio = Number(catIt.ofertas[j].precio) || 0;
+        }
+        if (precio > 0) { p.preciosLocales[it.cod] = precio; n++; }
+      }
+    });
+    Store.guardar(p);
+    avisoOk("Se trajeron " + n + " precios del catálogo.");
+    render();
+  };
+
+  var btnEnviar = document.getElementById("enviarPrecios");
+  if (btnEnviar) btnEnviar.onclick = function () {
+    if (!p.preciosLocales || !Object.keys(p.preciosLocales).length) {
+      avisoError("No hay precios locales para enviar."); return;
+    }
+    if (!confirm("Esto actualizará los precios del catálogo compartido con los precios de este proyecto. ¿Continuar?")) return;
+    var cat = Catalogo.leer();
+    if (!cat) { avisoError("No hay catálogo cargado."); return; }
+    var idx = Catalogo.indice(cat);
+    var n = 0;
+    Object.keys(p.preciosLocales).forEach(function (cod) {
+      var i = idx[cod];
+      if (i === undefined) return;
+      var it = cat.items[i];
+      if (it.ofertas && it.ofertas.length) {
+        var j = (p.proveedores && p.proveedores[cod] !== undefined) ? p.proveedores[cod] : (it.sel !== undefined ? it.sel : 0);
+        if (it.ofertas[j]) { it.ofertas[j].precio = p.preciosLocales[cod]; n++; }
+      } else {
+        it.precio = p.preciosLocales[cod]; n++;
+      }
+      it.act = new Date().toISOString();
+    });
+    Catalogo.guardar(cat);
+    avisoOk("Se enviaron " + n + " precios al catálogo.");
+  };
 }
 
 /* ---- 7.8 Paso 5: entrega ---- */

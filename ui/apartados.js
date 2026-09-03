@@ -99,7 +99,7 @@ function listaApu(p, lista, act) {
       '<div class="an"><span class="anum">APU ' + a.apu + '</span><span>' +
         a.cod.map(function (c) { return '<span class="chip">' + c + '</span>'; }).join("") +
         (listo ? '<span class="pt" title="con datos"></span>' : "") + '</span></div>' +
-      '<div class="ad">' + esc(a.items[0].desc) + '</div>' +
+      '<div class="ad" title="' + esc(a.items[0].desc) + '">' + esc(a.items[0].desc) + '</div>' +
       (a.items.length > 1 ? '<div class="anum" style="color:var(--limedk);margin-top:3px">' +
         a.items.length + ' ítems del anexo</div>' : "") +
     '</button>';
@@ -523,6 +523,10 @@ function panelApu(p, cat, act) {
     '<span class="cn">' + (comp.lineas.length ? comp.lineas.length + " insumos" : "sin datos") + '</span></div>' +
     cuerpoComp + '</div>';
 
+  var buscaInsumo = '<div class="card"><div class="chd"><span class="ct">Agregar insumo del catálogo</span></div>' +
+    '<div class="cbd"><input class="in" id="buscaInsumo" placeholder="Buscar por código o descripción…">' +
+    '<div id="resInsumo" style="margin-top:8px;max-height:220px;overflow-y:auto"></div></div></div>';
+
   var reglas = comp.reglas.length
     ? '<div class="note"><div class="notet">Reglas aplicadas</div><div class="noteb">' +
       comp.reglas.join(" ") + '</div></div>' : "";
@@ -544,7 +548,7 @@ function panelApu(p, cat, act) {
         '<div class="m" style="font-size:11px;color:var(--ink3);margin-top:7px">' +
         act.items.map(function (x) { return fmt(x.cant) + " " + esc(x.und); }).join("  ·  ") + '</div>' +
       '</div></div>' +
-    avisoPend + formSA + formCA + formTU + formEQ + formTA + formMO + reglas + avisos + tabla +
+    avisoPend + formSA + formCA + formTU + formEQ + formTA + formMO + reglas + avisos + tabla + buscaInsumo +
     '<div class="card"><div class="chd"><span class="ct">Consideraciones del análisis</span></div>' +
       '<div class="cbd"><textarea class="in" id="notaapu" ' +
       'placeholder="Por qué se armó así, qué se asumió, qué quedó por fuera.">' + esc(nota) + '</textarea></div></div>' +
@@ -875,6 +879,46 @@ function enlazarPanel(p) {
     var d = datosDe(p, act.apu);
     d.ajustes = {};
     Store.guardar(p); refrescarPanel(p);
+  };
+
+  /* --- buscador de insumos para agregar a mano --- */
+  var buscaIns = document.getElementById("buscaInsumo");
+  if (buscaIns) buscaIns.oninput = function () {
+    var q = this.value.trim().toLowerCase();
+    var cont = document.getElementById("resInsumo");
+    if (!cont) return;
+    if (q.length < 2) { cont.innerHTML = ""; return; }
+
+    var cat = Catalogo.leer();
+    var res = [];
+    if (cat) cat.items.forEach(function (it) {
+      if (res.length >= 15) return;
+      if ((it.cod || "").toLowerCase().indexOf(q) >= 0 ||
+          (it.desc || "").toLowerCase().indexOf(q) >= 0) res.push(it);
+    });
+    if (p.propios) Object.keys(p.propios).forEach(function (cod) {
+      if (res.length >= 15) return;
+      var it = p.propios[cod];
+      if (cod.toLowerCase().indexOf(q) >= 0 || (it.desc || "").toLowerCase().indexOf(q) >= 0) {
+        if (!res.some(function (r) { return r.cod === cod; })) res.push(it);
+      }
+    });
+
+    cont.innerHTML = res.map(function (it) {
+      return '<div class="resitem" data-addcod="' + esc(it.cod) + '" data-adddesc="' + esc(it.desc || "") +
+        '" data-addund="' + esc(it.und || "UN") +
+        '" style="padding:6px 8px;cursor:pointer;border-bottom:1px solid var(--line2);font-size:12.5px">' +
+        '<span class="m" style="color:var(--ink3)">' + esc(it.cod) + '</span> — ' + esc(it.desc || "") + '</div>';
+    }).join("") || '<div style="padding:8px;color:var(--ink3);font-size:13px">Sin resultados</div>';
+
+    Array.prototype.forEach.call(cont.querySelectorAll("[data-addcod]"), function (el) {
+      el.onclick = function () {
+        var d = datosDe(p, act.apu);
+        if (!d.extra) d.extra = [];
+        d.extra.push({ cod: el.dataset.addcod, desc: el.dataset.adddesc, und: el.dataset.addund, cant: 1 });
+        Store.guardar(p); refrescarPanel(p);
+      };
+    });
   };
 
   /* --- tableros --- */
