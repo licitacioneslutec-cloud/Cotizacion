@@ -96,8 +96,8 @@ function renderProyectos() {
         try {
           if (datos.catalogo) Catalogo.guardar(datos.catalogo);
           _cacheProy = (datos.proyectos || []).map(normalizarProyecto);
-          localStorage.setItem(CLAVE, JSON.stringify(_cacheProy));
-          if (datos.historial) localStorage.setItem(CLAVE_HIST, JSON.stringify(datos.historial));
+          IDB.escribirTodosProyectos(_cacheProy);
+          if (datos.historial) { _cacheHist = datos.historial; IDB.escribir("historial", datos.historial); }
           if (datos.plantillas) Plantillas.guardar(datos.plantillas);
           ir({ pantalla: "proyectos", tope: 150 });
         } catch (err) {

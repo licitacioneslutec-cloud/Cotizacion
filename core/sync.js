@@ -13,49 +13,67 @@ var Sync = {
 
   /* Listener en tiempo real de la lista de proyectos: crear/eliminar/modificar se ve sin recargar. */
   escucharProyectos: function () {
-    if (!db || Sync._listeners.proyectos) return;
-    Sync._listeners.proyectos = db.ref("proyectos").on("value", function (snap) {
-      var proys = snap.val();
-      if (!proys) return;
-      proys = transformarClaves(proys, decClaveFB);
-      var locales = Store.todos();
-      var porId = {};
-      locales.forEach(function (pp) { porId[pp.id] = pp; });
+    if (!db || Sync._listeners.proyChanged) return;
 
-      Object.keys(proys).forEach(function (id) {
-        var nube = proys[id];
-        if (!nube) return;
-        var loc = porId[id];
-        // No pisar el proyecto que el usuario tiene abierto y está editando
-        if (vista.pid === id) return;
-        if (!loc || (nube.modificado || "") > (loc.modificado || "")) {
-          normalizarProyecto(nube);
-          porId[id] = nube;
+    var onCambio = function (snap) {
+      var id = snap.key;
+      var nube = snap.val();
+      if (!nube) return;
+      nube = transformarClaves(nube, decClaveFB);
+      if (vista.pid === id) return;
+      var loc = Store.leer(id);
+      if (!loc || (nube.modificado || "") > (loc.modificado || "")) {
+        normalizarProyecto(nube);
+        var lista = Store.todos();
+        var encontrado = false;
+        for (var k = 0; k < lista.length; k++) {
+          if (lista[k].id === id) { lista[k] = nube; encontrado = true; break; }
         }
-      });
-
-      var lista = Object.keys(porId).map(function (k) { return porId[k]; });
-      lista.sort(function (a, b) { return (b.modificado || "").localeCompare(a.modificado || ""); });
-      _cacheProy = lista;
-      try { localStorage.setItem(CLAVE, JSON.stringify(lista)); } catch (e) {}
-
+        if (!encontrado) lista.unshift(nube);
+        _cacheProy = lista;
+        IDB.guardarProyecto(nube);
+      }
       if (vista.pantalla === "proyectos") render();
       Sync.marca("ok");
+    };
+
+    Sync._listeners.proyChanged = db.ref("proyectos").on("child_changed", onCambio);
+
+    Sync._listeners.proyRemoved = db.ref("proyectos").on("child_removed", function (snap) {
+      var id = snap.key;
+      if (vista.pid === id) return;
+      _cacheProy = Store.todos().filter(function (p) { return p.id !== id; });
+      IDB.borrarProyecto(id);
+      if (vista.pantalla === "proyectos") render();
     });
   },
 
   /* Listener en tiempo real del catálogo: empuja cada cambio a todos los equipos. */
   escucharCatalogo: function () {
-    if (!db || Sync._listeners.catalogo) return;
-    Sync._listeners.catalogo = db.ref("catalogo").on("value", function (snap) {
-      var cat = snap.val();
-      if (!cat || !cat.items) return;
-      cat = transformarClaves(cat, decClaveFB);
-      var local = Catalogo.leer();
-      var fNube = cat.modificado || "";
-      var fLoc = local && local.modificado ? local.modificado : "";
-      if (fNube > fLoc) {
-        // Auto-snapshot de proyectos no congelados que usarían los precios nuevos (máx. 1 vez por día)
+    if (!db || Sync._listeners.catItems) return;
+
+    Sync._listeners.catItems = db.ref("catalogo/items").on("child_changed", function (snap) {
+      var idx = Number(snap.key);
+      var itemNube = snap.val();
+      if (!itemNube || isNaN(idx)) return;
+      itemNube = transformarClaves(itemNube, decClaveFB);
+      var cat = Catalogo.leer();
+      if (!cat || !cat.items || idx >= cat.items.length) return;
+      cat.items[idx] = itemNube;
+      _cacheCat = cat;
+      _idxCat = null;
+      IDB.escribir("catalogo", cat);
+      if (vista.pantalla === "catalogo" || vista.pantalla === "precios" || vista.pantalla === "ofertas") render();
+      Sync.marca("ok");
+    });
+
+    Sync._listeners.catMod = db.ref("catalogo/modificado").on("value", function (snap) {
+      var fNube = snap.val() || "";
+      var cat = Catalogo.leer();
+      var fLoc = cat && cat.modificado ? cat.modificado : "";
+      if (fNube > fLoc && cat) {
+        cat.modificado = fNube;
+        _cacheCat = cat;
         var hoy = new Date().toISOString().slice(0, 10);
         var ultimoAutoSnap = localStorage.getItem("apu.lastAutoSnap") || "";
         if (hoy !== ultimoAutoSnap) {
@@ -66,12 +84,6 @@ var Sync = {
             }
           });
         }
-        _cacheCat = cat; _catLeido = true; _idxCat = null;
-        try { localStorage.setItem(CLAVE_CAT, JSON.stringify(cat)); } catch (e) {}
-        Sync.marca("ok");
-        if (vista.pantalla === "catalogo" || vista.pantalla === "precios" || vista.pantalla === "ofertas") {
-          render();
-        }
       }
     });
   },
@@ -79,13 +91,21 @@ var Sync = {
   /* Apaga todos los listeners en tiempo real (catálogo + proyectos). */
   detenerListeners: function () {
     if (!db) return;
-    if (Sync._listeners.catalogo) {
-      db.ref("catalogo").off("value", Sync._listeners.catalogo);
-      Sync._listeners.catalogo = null;
+    if (Sync._listeners.catItems) {
+      db.ref("catalogo/items").off("child_changed", Sync._listeners.catItems);
+      Sync._listeners.catItems = null;
     }
-    if (Sync._listeners.proyectos) {
-      db.ref("proyectos").off("value", Sync._listeners.proyectos);
-      Sync._listeners.proyectos = null;
+    if (Sync._listeners.catMod) {
+      db.ref("catalogo/modificado").off("value", Sync._listeners.catMod);
+      Sync._listeners.catMod = null;
+    }
+    if (Sync._listeners.proyChanged) {
+      db.ref("proyectos").off("child_changed", Sync._listeners.proyChanged);
+      Sync._listeners.proyChanged = null;
+    }
+    if (Sync._listeners.proyRemoved) {
+      db.ref("proyectos").off("child_removed", Sync._listeners.proyRemoved);
+      Sync._listeners.proyRemoved = null;
     }
   },
 
@@ -142,7 +162,7 @@ var Sync = {
       var lista = Store.todos();
       for (var i = 0; i < lista.length; i++) if (lista[i].id === id) { lista[i] = nube; break; }
       _cacheProy = lista;
-      try { localStorage.setItem(CLAVE, JSON.stringify(lista)); } catch (e) {}
+      IDB.escribirTodosProyectos(lista);
       render();
       avisoOk("Se cargó la versión de " + quien + ".");
     } else {
@@ -251,7 +271,7 @@ var Sync = {
         for (var k = 0; k < lista.length; k++) if (lista[k].id === id) { i = k; break; }
         if (i >= 0) lista[i] = nube; else lista.unshift(nube);
         _cacheProy = lista;
-        try { localStorage.setItem(CLAVE, JSON.stringify(lista)); } catch (e) {}
+        IDB.guardarProyecto(nube);
         return nube;
       }
       return null;
@@ -287,7 +307,16 @@ var Sync = {
     };
     delete snapshot.datos.baseModificado;
     return Nube.escribir("snapshots/" + proyId + "/" + ts, snapshot)
-      .then(function () { return true; })
+      .then(function () {
+        Sync.listarSnapshots(proyId).then(function (lista) {
+          if (lista.length > 5) {
+            lista.slice(5).forEach(function (s) {
+              Nube.borrar("snapshots/" + proyId + "/" + s.ts).catch(function () {});
+            });
+          }
+        });
+        return true;
+      })
       .catch(function () { return false; });
   },
   listarSnapshots: function (proyId) {
@@ -330,16 +359,20 @@ var Sync = {
   }
 };
 
+var _cacheHist = null;
+
 var Historial = {
   leer: function () {
-    try { return JSON.parse(localStorage.getItem(CLAVE_HIST) || "[]"); }
-    catch (e) { return []; }
+    if (_cacheHist !== null) return _cacheHist;
+    _cacheHist = [];
+    return _cacheHist;
   },
   agregar: function (reg) {
     var h = Historial.leer();
     h.unshift(reg);
     if (h.length > 40) h = h.slice(0, 40);
-    try { localStorage.setItem(CLAVE_HIST, JSON.stringify(h)); } catch (e) {}
+    _cacheHist = h;
+    IDB.escribir("historial", h);
   }
 };
 

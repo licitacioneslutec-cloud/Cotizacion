@@ -140,14 +140,17 @@ var CLAVE_HIST = "apu.historial.v1";
 var CLAVE_PLAN = "apu.plantillas.v1";
 
 /* Análisis ya armados que se guardan para reutilizar en otros proyectos */
+var _cachePlan = null;
 var Plantillas = {
   leer: function () {
-    try { return JSON.parse(localStorage.getItem(CLAVE_PLAN) || "[]"); }
-    catch (e) { return []; }
+    if (_cachePlan !== null) return _cachePlan;
+    _cachePlan = [];
+    return _cachePlan;
   },
   guardar: function (lista) {
-    try { localStorage.setItem(CLAVE_PLAN, JSON.stringify(lista)); return true; }
-    catch (e) { avisoError("No se pudo guardar la plantilla: falta espacio."); return false; }
+    _cachePlan = lista;
+    IDB.escribir("plantillas", lista);
+    return true;
   },
   agregar: function (nombre, datos) {
     var l = Plantillas.leer();
