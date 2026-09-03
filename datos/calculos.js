@@ -152,6 +152,7 @@ function leerLibro(buffer) {
 /* Garantiza la forma correcta de un proyecto que puede venir de la nube o de un respaldo viejo */
 function normalizarProyecto(p) {
   if (!p) return p;
+  if (!p.preciosLocales) p.preciosLocales = {};
   if (!p.hojas) return p;
   p.hojas.forEach(function (h) {
     if (!h.filas) { h.filas = []; return; }

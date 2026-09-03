@@ -10,7 +10,7 @@
    ------------------------------------------------------------------ */
 
 var vista = { pantalla: "proyectos", pid: null, paso: "ficha", hoja: 0, sel: [], borrador: null,
-              precios: null, busca: "", soloSin: false, apu: null };
+              precios: null, busca: "", soloSin: false, apu: null, filtroArmadoApu: "" };
 var app = document.getElementById("app");
 
 function ir(cambios) {
