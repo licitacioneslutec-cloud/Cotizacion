@@ -38,6 +38,7 @@ var Sync = {
     };
 
     Sync._listeners.proyChanged = db.ref("proyectos").on("child_changed", onCambio);
+    Sync._listeners.proyAdded = db.ref("proyectos").on("child_added", onCambio);
 
     Sync._listeners.proyRemoved = db.ref("proyectos").on("child_removed", function (snap) {
       var id = snap.key;
@@ -102,6 +103,10 @@ var Sync = {
     if (Sync._listeners.proyChanged) {
       db.ref("proyectos").off("child_changed", Sync._listeners.proyChanged);
       Sync._listeners.proyChanged = null;
+    }
+    if (Sync._listeners.proyAdded) {
+      db.ref("proyectos").off("child_added", Sync._listeners.proyAdded);
+      Sync._listeners.proyAdded = null;
     }
     if (Sync._listeners.proyRemoved) {
       db.ref("proyectos").off("child_removed", Sync._listeners.proyRemoved);
@@ -227,18 +232,41 @@ var Sync = {
 
       var res = { ok: !fallo, catalogo: false, nProy: 0, sembrado: false };
 
-      /* ---- Catálogo: sembrar la nube si está vacía ---- */
+      /* ---- Catálogo: bajar de la nube o sembrar si está vacía ---- */
       var local = Catalogo.leer();
-      if ((!cat || !cat.items || !cat.items.length) && local && local.items && local.items.length) {
+      if (cat && cat.items && cat.items.length) {
+        cat = transformarClaves(cat, decClaveFB);
+        var fLoc = local && local.modificado ? local.modificado : "";
+        if ((cat.modificado || "") >= fLoc) {
+          _cacheCat = cat; _catLeido = true; _idxCat = null;
+          IDB.escribir("catalogo", cat);
+        }
+        res.catalogo = true;
+      } else if (local && local.items && local.items.length) {
         Nube.escribir("catalogo", local).then(function () { Sync.marca("ok"); }).catch(function () {});
         res.sembrado = true;
       }
-      res.catalogo = !!(cat && cat.items && cat.items.length);
 
-      /* ---- Proyectos: subir los que solo existen en local ---- */
+      /* ---- Proyectos: mergear nube→local y subir los que solo existen en local ---- */
       var locales = Store.todos();
       if (proys) {
+        proys = transformarClaves(proys, decClaveFB);
+        var porId = {};
+        locales.forEach(function (pp) { porId[pp.id] = pp; });
+        Object.keys(proys).forEach(function (id) {
+          var nube = proys[id];
+          if (!nube) return;
+          var loc = porId[id];
+          if (!loc || (nube.modificado || "") > (loc.modificado || "")) {
+            normalizarProyecto(nube);
+            porId[id] = nube;
+          }
+        });
         locales.forEach(function (pp) { if (!proys[pp.id]) Sync.subirProyecto(pp); });
+        var lista = Object.keys(porId).map(function (k) { return porId[k]; });
+        lista.sort(function (a, b) { return (b.modificado || "").localeCompare(a.modificado || ""); });
+        _cacheProy = lista;
+        IDB.escribirTodosProyectos(lista);
         res.nProy = Object.keys(proys).length;
       } else if (locales.length) {
         locales.forEach(function (pp) { Sync.subirProyecto(pp); });
