@@ -9,14 +9,10 @@
 var _cacheProy = null;
 var _cacheCat = null;
 var _catLeido = false;
-var _avisoEspacio = false;
 
 var Store = {
   todos: function () {
-    if (_cacheProy) return _cacheProy;
-    try { _cacheProy = JSON.parse(localStorage.getItem(CLAVE) || "[]"); }
-    catch (e) { _cacheProy = []; }
-    _cacheProy.forEach(normalizarProyecto);
+    if (!_cacheProy) _cacheProy = [];
     return _cacheProy;
   },
   guardar: function (proy) {
@@ -26,17 +22,9 @@ var Store = {
     if (Nube.yo) proy.ultimoEditor = Nube.yo;
     if (i >= 0) lista[i] = proy; else lista.unshift(proy);
     _cacheProy = lista;
-    var ok = true;
-    try { localStorage.setItem(CLAVE, JSON.stringify(lista)); }
-    catch (e) {
-      ok = false;
-      if (!_avisoEspacio) {
-        _avisoEspacio = true;
-        avisoError("El navegador se quedó sin espacio y no se pudo guardar. Descarga el respaldo de tus proyectos y borra alguno que ya no uses.");
-      }
-    }
+    IDB.guardarProyecto(proy);
     Sync.subirProyecto(proy);
-    return ok;
+    return true;
   },
   leer: function (pid) {
     var l = Store.todos();
@@ -46,17 +34,14 @@ var Store = {
   borrar: function (pid) {
     var lista = Store.todos().filter(function (p) { return p.id !== pid; });
     _cacheProy = lista;
-    try { localStorage.setItem(CLAVE, JSON.stringify(lista)); } catch (e) {}
+    IDB.borrarProyecto(pid);
     Sync.borrarProyecto(pid);
   }
 };
 /* Catálogo de insumos, compartido por todos los proyectos */
 var Catalogo = {
   leer: function () {
-    if (_catLeido) return _cacheCat;
-    _catLeido = true;
-    try { _cacheCat = JSON.parse(localStorage.getItem(CLAVE_CAT) || "null"); }
-    catch (e) { _cacheCat = null; }
+    if (!_catLeido) _catLeido = true;
     return _cacheCat;
   },
   /* indiceCambio: si se pasa (y >= 0), solo cambió ese ítem y se sube nada más él (PATCH).
@@ -65,15 +50,13 @@ var Catalogo = {
     cat.modificado = new Date().toISOString();
     _cacheCat = cat; _catLeido = true;
     _idxCat = null;
-    var ok = true;
-    try { localStorage.setItem(CLAVE_CAT, JSON.stringify(cat)); }
-    catch (e) { ok = false; avisoError("No se pudo guardar el catálogo: el navegador se quedó sin espacio."); }
+    IDB.escribir("catalogo", cat);
     if (indiceCambio !== undefined && indiceCambio >= 0) Sync.subirItem(indiceCambio, cat.items[indiceCambio]);
     else Sync.subirCatalogo();
-    return ok;
+    return true;
   },
   borrar: function () {
-    localStorage.removeItem(CLAVE_CAT);
+    IDB.borrar("catalogo");
     _cacheCat = null; _catLeido = true; _idxCat = null;
   },
   indice: function (cat) {

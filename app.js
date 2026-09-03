@@ -169,16 +169,24 @@ function renderSync() {
 /* Arranque: recuperar el nombre y sincronizar al abrir */
 Nube.yo = localStorage.getItem("apu.sync.yo") || "";
 
-render();
-
-if (Sync.encendida()) {
-  Sync.escucharCatalogo();
-  Sync.escucharProyectos();
-  Sync.bajarTodo().then(function (res) {
-    render();
-    if (res && res.ok && (res.catalogo || res.nProy)) {
-      Sync.marca("ok");
-    }
-  });
-}
+IDB.abrir().then(function () {
+  return Promise.all([IDB.todosProyectos(), IDB.leer("catalogo"), IDB.leer("historial"), IDB.leer("plantillas")]);
+}).then(function (r) {
+  _cacheProy = r[0] || [];
+  _cacheProy.forEach(normalizarProyecto);
+  if (r[1]) { _cacheCat = r[1]; _catLeido = true; }
+  _cacheHist = r[2] || [];
+  _cachePlan = r[3] || [];
+  render();
+  if (Sync.encendida()) {
+    Sync.escucharCatalogo();
+    Sync.escucharProyectos();
+    Sync.bajarTodo().then(function (res) {
+      render();
+      if (res && res.ok && (res.catalogo || res.nProy)) Sync.marca("ok");
+    });
+  }
+}).catch(function () {
+  render();
+});
 
