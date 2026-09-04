@@ -472,7 +472,7 @@ function exportarTodo(p) {
       var precioCell = precioVal;
       var totalCell = totalVal;
       if (!l.falta && insRow[l.cod]) {
-        precioCell = { formula: "Insumos!$F$" + insRow[l.cod], result: precioVal || 0 };
+        precioCell = { formula: "Insumos!$G$" + insRow[l.cod], result: precioVal || 0 };
         totalCell = { formula: "D" + ra + "*(1+E" + ra + ")*F" + ra, result: totalVal || 0 };
       }
       var r = a3.addRow([l.cod, l.desc, l.und, l.cant, l.desp ? l.desp / 100 : null,
