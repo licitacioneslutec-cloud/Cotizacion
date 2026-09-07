@@ -832,6 +832,7 @@ function vArmado(p, r) {
     if (filtro && (f.desc || "").toLowerCase().indexOf(filtro) < 0 &&
         (f.item || "").toLowerCase().indexOf(filtro) < 0) return;
     if (filtroApu && String(f.apu || "").indexOf(filtroApu) < 0) return;
+    if (vista.soloSinApu && f.apu) return;
     if (capPend && !filtro) {
       var capDel = capPend.f.manual ? ' <button class="btnx" data-borrarfila="' + vista.hoja + ':' + capPend.fi + '" title="Eliminar capítulo" style="color:#c00;font-size:13px;margin-left:6px">×</button>' : '';
       cuerpo += '<tr class="caprow"><td colspan="' + colspan + '">' + esc(capPend.f.item) + ' · ' + esc(capPend.f.desc) + capDel + '</td></tr>';
@@ -942,6 +943,8 @@ function vArmado(p, r) {
             (verPct ? ' checked' : '') + '> % Material / M.O.</label>' +
           '<label class="lbl" style="font-size:12px;cursor:pointer"><input type="checkbox" id="togtot"' +
             (verTot ? ' checked' : '') + '> Valores totales</label>' +
+          '<label class="lbl" style="font-size:12px;cursor:pointer"><input type="checkbox" id="togsinapu"' +
+            (vista.soloSinApu ? ' checked' : '') + '> Solo sin APU</label>' +
         '</div>' +
         '<input class="in infiltro" id="filtroarmado" placeholder="Filtrar por descripción o ítem" value="' +
           esc(vista.filtroArmado || "") + '">' +
@@ -957,7 +960,8 @@ function vArmado(p, r) {
         encPct + encPrecio +
       '</tr></thead><tbody>' + cuerpo + '</tbody></table></div>' + barra +
       '<div class="btnrow" style="margin:12px 0"><button class="btn" id="agregarItem">+ Agregar ítem</button>' +
-        '<button class="btn" id="agregarCap" style="margin-left:8px">+ Agregar capítulo</button></div>' +
+        '<button class="btn" id="agregarCap" style="margin-left:8px">+ Agregar capítulo</button>' +
+        '<button class="btn" id="agruparIguales" style="margin-left:8px">Agrupar iguales</button></div>' +
     '</div>' +
     '<div class="note"><div class="notet">Cómo se usa</div>' +
     '<div class="noteb">Toca una sigla para decir a qué apartado va el ítem. Escribe el mismo número de ' +
@@ -986,6 +990,8 @@ function enlazarArmado(p) {
   if (tp) tp.onchange = function () { vista.verPctMatMo = this.checked; var y = window.scrollY; render(); window.scrollTo(0, y); };
   var tt = document.getElementById("togtot");
   if (tt) tt.onchange = function () { vista.verTotales = this.checked; var y = window.scrollY; render(); window.scrollTo(0, y); };
+  var tsa = document.getElementById("togsinapu");
+  if (tsa) tsa.onchange = function () { vista.soloSinApu = this.checked; var y = window.scrollY; render(); window.scrollTo(0, y); };
   Array.prototype.forEach.call(document.querySelectorAll("[data-hoja]"), function (b) {
     b.onclick = function () { ir({ hoja: Number(b.dataset.hoja), sel: [] }); };
   });
@@ -1109,6 +1115,30 @@ function enlazarArmado(p) {
   };
   var b4 = document.getElementById("cancelar");
   if (b4) b4.onclick = function () { ir({ sel: [] }); };
+  var btnAg = document.getElementById("agruparIguales");
+  if (btnAg) btnAg.onclick = function () {
+    var norm = function (s) { return (s || "").replace(/\s+/g, " ").trim().toLowerCase(); };
+    var grupos = {};
+    itemsDe(p).forEach(function (x) {
+      var clave = norm(x.f.desc);
+      if (!clave) return;
+      if (!grupos[clave]) grupos[clave] = [];
+      grupos[clave].push(x.f);
+    });
+    var agrupados = 0;
+    Object.keys(grupos).forEach(function (clave) {
+      var items = grupos[clave];
+      if (items.length < 2) return;
+      var conApu = items.filter(function (f) { return f.apu; });
+      var apu = conApu.length ? Math.min.apply(null, conApu.map(function (f) { return f.apu; })) : siguienteApu(p);
+      items.forEach(function (f) {
+        if (f.apu !== apu) { f.apu = apu; if (!f.cod || !f.cod.length) f.cod = ["CA"]; agrupados++; }
+      });
+    });
+    if (!agrupados) { avisoOk("No hay ítems repetidos para agrupar."); return; }
+    Store.guardar(p); render();
+    avisoOk("Se agruparon " + agrupados + " ítems en análisis compartidos.");
+  };
   Array.prototype.forEach.call(document.querySelectorAll("[data-borrarfila]"), function (el) {
     el.onclick = function (e) {
       e.stopPropagation();
