@@ -43,13 +43,14 @@ function parsearTuberia(descripcion, opciones) {
     .filter(function (t) { return d.indexOf(limpia(t)) >= 0; })[0] || "";
 
   var cantidad = null, diamRaw = null;
-  var mQD = d.match(/(\d+(?:[.,]\d+)?)?\s*[ØO]\s*(\d+(?:\/\d+)?)/);
+  var mQD = d.match(/(\d+(?:[.,]\d+)?)?\s*[ØO]\s*(\d+[\s.\-]\d+\/\d+|\d+(?:\/\d+)?)/);
   if (mQD) {
     if (mQD[1]) cantidad = Number(mQD[1].replace(",", "."));
     diamRaw = soloDig(mQD[2]);
   }
   if (!diamRaw) {
-    var mD = d.match(/(\d+(?:\/\d+)?)\s*"/) || d.match(/(\d+(?:\/\d+)?)\s*PULGADAS?/);
+    var mD = d.match(/(\d+[\s.\-]\d+\/\d+|\d+(?:\/\d+)?)\s*"/) ||
+             d.match(/(\d+[\s.\-]\d+\/\d+|\d+(?:\/\d+)?)\s*PULGADAS?/);
     if (mD) diamRaw = soloDig(mD[1]);
   }
   var diam = diamRaw
@@ -64,6 +65,11 @@ function parsearTuberia(descripcion, opciones) {
     cantidad = mc ? Number(mc[1].replace(",", ".")) : 1;
   }
   if (!cantidad) cantidad = 1;
+
+  if (!tipo && material) {
+    tipo = (limpia(material) === "PVC") ? "ZONA VERDE" : "DESCOLGADA";
+    if ((op.tipos || []).indexOf(tipo) < 0) tipo = "";
+  }
 
   return { material: material, tipo: tipo, diam: diam, cantidad: cantidad };
 }
@@ -358,14 +364,30 @@ function listaCables(cat) {
 
 function materialCableDe(descripcion) {
   var d = limpia(descripcion);
-  if (d.indexOf("ALUMINIO") >= 0) return "ALUMINIO";
-  if (d.indexOf("COBRE") >= 0) return "COBRE";
+  if (d.indexOf("ALUMINIO") >= 0 || /\bAL\b/.test(d)) return "ALUMINIO";
+  if (d.indexOf("COBRE") >= 0 || /\bCU\b/.test(d)) return "COBRE";
+  if (d.indexOf("DESNUDO") >= 0) return "DESNUDO";
   return null;
 }
 
-function cableParaCalibre(cables, calibre, material) {
+function recubrimientoDe(descripcion) {
+  var d = limpia(descripcion);
+  if (d.indexOf("DESNUDO") >= 0) return "DESNUDO";
+  if (d.indexOf("LIBRE DE HALOGENOS") >= 0 || d.indexOf("LIBRE HALOGENOS") >= 0 || d.indexOf("HFFR") >= 0) return "HFFR";
+  var tipos = ["THWN", "THHN", "XLPE", "XHHW", "THW"];
+  for (var i = 0; i < tipos.length; i++) {
+    if (d.indexOf(tipos[i]) >= 0) return tipos[i];
+  }
+  return null;
+}
+
+function cableParaCalibre(cables, calibre, material, recubrimiento) {
   var candidatos = cables.filter(function (c) { return calibreDe(c.desc) === calibre; });
   if (!candidatos.length) return null;
+  if (recubrimiento) {
+    var conRec = candidatos.filter(function (c) { return limpia(c.desc).indexOf(recubrimiento) >= 0; });
+    if (conRec.length) candidatos = conRec;
+  }
   if (material) {
     var conMat = candidatos.filter(function (c) { return limpia(c.desc).indexOf(material) >= 0; });
     if (conMat.length) return conMat[0];
@@ -376,15 +398,29 @@ function cableParaCalibre(cables, calibre, material) {
 function parsearCableado(descripcion, cables) {
   var re = /(\d+)\s*No\.?\s*(\d+(?:\/\d+)?)\s*(?:AWG)?\s*\(\s*([FNT])\s*\)/gi;
   var material = materialCableDe(descripcion);
+  var recub = recubrimientoDe(descripcion) || "THHN";
   var roles = { F: "fase", N: "neutro", T: "tierra" };
   var out = {}, m;
   while ((m = re.exec(descripcion))) {
     var cant = Number(m[1]) || 0;
     var rol = roles[m[3].toUpperCase()];
     if (!rol || cant <= 0) continue;
-    var cable = cableParaCalibre(cables, m[2], material);
+    var cable = cableParaCalibre(cables, m[2], material, recub);
     if (!cable) continue;
     out[rol] = { cod: cable.cod, cant: cant };
+  }
+  if (!Object.keys(out).length) {
+    var re2 = /(\d+)\s*No\.?\s*(\d+(?:\/\d+)?)/gi;
+    var posRoles = ["fase", "neutro", "tierra"];
+    var idx = 0;
+    while ((m = re2.exec(descripcion)) && idx < 3) {
+      var cant2 = Number(m[1]) || 0;
+      if (cant2 <= 0) continue;
+      var cable2 = cableParaCalibre(cables, m[2], material, recub);
+      if (!cable2) continue;
+      out[posRoles[idx]] = { cod: cable2.cod, cant: cant2 };
+      idx++;
+    }
   }
   return Object.keys(out).length ? out : null;
 }
