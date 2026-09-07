@@ -153,6 +153,22 @@ function imprimirPropuesta(p) {
         .map(function (l) { return '<p>' + esc(l) + '</p>'; }).join("") + '</div>'
     : "";
 
+  var perfil = {};
+  try { perfil = JSON.parse(localStorage.getItem("apu.perfil") || "{}"); } catch (e) {}
+  var pago = '<table class="res"><tbody>' +
+      filaTot((p.anticipo || 0) + "% ANTICIPO", t.total * (p.anticipo || 0) / 100) +
+      filaTot((100 - (p.anticipo || 0)) + "% AVANCE DE OBRA", t.total * (100 - (p.anticipo || 0)) / 100) +
+    '</tbody></table>' +
+    '<p style="margin:6px 0 0;font-size:11px;color:var(--ink2)">Validez de la oferta: ' +
+      (p.validezDias || 0) + ' días calendario.</p>' +
+    (perfil.firma || perfil.nombre || perfil.cargo
+      ? '<div style="margin-top:18px">' +
+          (perfil.firma ? '<img src="' + esc(perfil.firma) + '" style="max-width:160px;max-height:70px;display:block">' : "") +
+          (perfil.nombre ? '<div style="font-weight:600;margin-top:4px">' + esc(perfil.nombre) + '</div>' : "") +
+          (perfil.cargo ? '<div style="font-size:11px;color:var(--ink2)">' + esc(perfil.cargo) + '</div>' : "") +
+        '</div>'
+      : "");
+
   var w = window.open("", "_blank");
   if (!w) { avisoError("El navegador bloqueó la ventana. Permite las ventanas emergentes de este sitio."); return; }
   w.document.write('<!doctype html><html lang="es"><head><meta charset="utf-8">' +
@@ -175,7 +191,7 @@ function imprimirPropuesta(p) {
       '<tr><td class="k">Ítems</td><td>' + (t.conValor + t.sinValor) + '</td>' +
         '<td class="k">Análisis</td><td>' + t.analisis + '</td></tr>' +
     '</tbody></table>' +
-    '<h2>Resumen</h2>' + resumen + cons +
+    '<h2>Resumen</h2>' + resumen + '<h3>Forma de pago</h3>' + pago + cons +
     '<div class="salto"></div><h2>Cotización</h2>' + cot +
     '<div class="salto"></div><h2>Análisis de precios unitarios</h2>' + ana +
     '<footer class="pie">Lutec · Soluciones brillantes · www.lutec.com.co</footer>' +
@@ -351,6 +367,41 @@ function exportarTodo(p) {
       m.getCell("B" + fila).alignment = { wrapText: true };
       fila++;
     });
+  }
+
+  fila += 1;
+  m.getCell("B" + fila).value = "FORMA DE PAGO";
+  m.getCell("B" + fila).font = { bold: true, size: 10, color: { argb: "FFFFFFFF" } };
+  m.mergeCells("B" + fila + ":E" + fila);
+  m.getCell("B" + fila).fill = fill(NAVY);
+  fila++;
+  res((p.anticipo || 0) + "% ANTICIPO", t.total * (p.anticipo || 0) / 100);
+  res((100 - (p.anticipo || 0)) + "% AVANCE DE OBRA", t.total * (100 - (p.anticipo || 0)) / 100);
+
+  fila += 1;
+  m.getCell("B" + fila).value = "VALIDEZ DE LA OFERTA";
+  m.getCell("B" + fila).font = { bold: true, size: 9, color: { argb: "FF5A6B7B" } };
+  m.mergeCells("C" + fila + ":E" + fila);
+  m.getCell("C" + fila).value = (p.validezDias || 0) + " DÍAS CALENDARIO";
+  fila++;
+
+  var perfil = {};
+  try { perfil = JSON.parse(localStorage.getItem("apu.perfil") || "{}"); } catch (e) {}
+  if (perfil.firma || perfil.nombre || perfil.cargo) {
+    fila += 1;
+    if (perfil.firma) {
+      try {
+        var comma = perfil.firma.indexOf(",");
+        var b64 = comma >= 0 ? perfil.firma.slice(comma + 1) : perfil.firma;
+        var imgFirma = wb.addImage({ base64: b64, extension: "png" });
+        m.addImage(imgFirma, { tl: { col: 1, row: fila - 1 }, ext: { width: 140, height: 60 } });
+        fila += 4;
+      } catch (e) {}
+    }
+    if (perfil.nombre) { m.getCell("B" + fila).value = perfil.nombre;
+      m.getCell("B" + fila).font = { bold: true, size: 10, color: { argb: NAVY } }; fila++; }
+    if (perfil.cargo) { m.getCell("B" + fila).value = perfil.cargo;
+      m.getCell("B" + fila).font = { size: 9, color: { argb: "FF5A6B7B" } }; fila++; }
   }
 
   /* ===== 2. COTIZACIÓN ===== */

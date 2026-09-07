@@ -207,6 +207,7 @@ tr[data-aj] td:first-child{box-shadow:inset 3px 0 0 var(--lime);}
 .btn:focus-visible{outline:2px solid var(--lime);outline-offset:1px;}
 .btnp{background:var(--navy);border-color:var(--navy);color:#fff;}
 .btnp:hover{background:var(--navy2);}
+.btnmini{font-size:11px;padding:2px 8px;border-radius:4px;}
 .btn:disabled{opacity:.4;cursor:not-allowed;}
 .btnrow{display:flex;gap:8px;flex-wrap:wrap;}
 
@@ -232,6 +233,10 @@ tr[data-aj] td:first-child{box-shadow:inset 3px 0 0 var(--lime);}
   text-transform:uppercase;color:var(--err);margin-bottom:5px;}
 .errglobal-b{font-size:13px;color:var(--err);line-height:1.55;word-break:break-word;}
 .errglobal-a{display:flex;gap:8px;margin-top:11px;}
+
+/* ---- modal ---- */
+.modalfondo{position:fixed;inset:0;background:rgba(15,36,54,.55);display:flex;align-items:center;justify-content:center;z-index:200;padding:20px;}
+.modalcaja{width:100%;max-width:420px;max-height:90vh;overflow:auto;}
 
 /* ---- lista de proyectos ---- */
 .prow{display:flex;justify-content:space-between;gap:16px;align-items:center;padding:14px 17px;

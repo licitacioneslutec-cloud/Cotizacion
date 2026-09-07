@@ -45,6 +45,7 @@ function barraTop(activa) {
     '<div class="tirasync">' +
       '<span id="syncestado" class="syncestado"></span>' +
       '<button class="tirab" data-top="sync">Sincronización</button>' +
+      '<button class="tirab" id="btnperfil">Mi perfil</button>' +
     '</div>' +
     '</div></div>';
 }
@@ -53,6 +54,8 @@ function enlazarTop() {
     b.onclick = function () { ir({ pantalla: b.dataset.top, sel: [], precios: null }); };
   });
   Sync.marca(Sync.encendida() ? "ok" : "");
+  var bp = document.getElementById("btnperfil");
+  if (bp) bp.onclick = abrirPerfil;
 }
 
 
@@ -166,8 +169,70 @@ function renderSync() {
   };
 }
 
+/* ------------------------------------------------------------------ */
+/* Perfil de presupuestador                                           */
+/* ------------------------------------------------------------------ */
+function formularioPerfil(p) {
+  p = p || {};
+  var puede = !!Perfil.leer();
+  return '<div class="modalfondo" id="perfilfondo"><div class="modalcaja card"><div class="cbd">' +
+    '<div class="ct" style="margin-bottom:12px">Tu perfil</div>' +
+    '<div class="field"><label class="lbl" for="pfnombre">Nombre</label>' +
+      '<input class="in" id="pfnombre" value="' + esc(p.nombre || "") + '"></div>' +
+    '<div class="field"><label class="lbl" for="pfcargo">Cargo</label>' +
+      '<input class="in" id="pfcargo" value="' + esc(p.cargo || "") + '"></div>' +
+    '<div class="field"><label class="lbl" for="pfemail">Email</label>' +
+      '<input class="in" id="pfemail" value="' + esc(p.email || "") + '"></div>' +
+    '<div class="field"><label class="lbl" for="pftel">Teléfono</label>' +
+      '<input class="in" id="pftel" value="' + esc(p.tel || "") + '"></div>' +
+    '<div class="field"><label class="lbl" for="pffirma">Imagen de firma (PNG o JPG)</label>' +
+      '<input class="in" type="file" id="pffirma" accept="image/png,image/jpeg">' +
+      (p.firma ? '<img src="' + p.firma + '" alt="Firma actual" style="max-width:220px;margin-top:8px;display:block">' : '') +
+    '</div>' +
+    '<div class="btnrow" style="margin-top:14px">' +
+      '<button class="btn btnp" id="pfguardar">Guardar</button>' +
+      (puede ? '<button class="btn" id="pfcerrar">Cancelar</button>' : '') +
+    '</div>' +
+  '</div></div></div>';
+}
+function abrirPerfil() {
+  cerrarPerfil();
+  var actual = Perfil.leer() || {};
+  var firmaB64 = actual.firma || "";
+  document.body.insertAdjacentHTML("beforeend", formularioPerfil(actual));
+  var archivo = document.getElementById("pffirma");
+  archivo.onchange = function () {
+    var f = archivo.files[0];
+    if (!f) return;
+    var lector = new FileReader();
+    lector.onload = function () { firmaB64 = lector.result; };
+    lector.readAsDataURL(f);
+  };
+  var cerrar = document.getElementById("pfcerrar");
+  if (cerrar) cerrar.onclick = cerrarPerfil;
+  document.getElementById("pfguardar").onclick = function () {
+    var nombre = document.getElementById("pfnombre").value.trim();
+    if (!nombre) { avisoError("El nombre es obligatorio."); return; }
+    Perfil.guardar({
+      nombre: nombre,
+      cargo: document.getElementById("pfcargo").value.trim(),
+      email: document.getElementById("pfemail").value.trim(),
+      tel: document.getElementById("pftel").value.trim(),
+      firma: firmaB64
+    });
+    cerrarPerfil();
+    avisoOk("Perfil guardado.");
+  };
+}
+function cerrarPerfil() {
+  var f = document.getElementById("perfilfondo");
+  if (f) f.remove();
+}
+
 /* Arranque: recuperar el nombre y sincronizar al abrir */
-Nube.yo = localStorage.getItem("apu.sync.yo") || "";
+var _perfil = Perfil.leer();
+Nube.yo = (_perfil && _perfil.nombre) || localStorage.getItem("apu.sync.yo") || "";
+if (!_perfil) setTimeout(abrirPerfil, 500);
 
 IDB.abrir().then(function () {
   return Promise.all([IDB.todosProyectos(), IDB.leer("catalogo"), IDB.leer("historial"), IDB.leer("plantillas")]);
