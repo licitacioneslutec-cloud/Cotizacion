@@ -30,6 +30,44 @@ function opcionesTuberia(cat, material, tipo) {
   return { familias: orden(fam), tipos: orden(sub), diametros: orden(dia) };
 }
 
+function parsearTuberia(descripcion, opciones) {
+  var d = limpia(descripcion);
+  var op = opciones || {};
+  var porLargo = function (a, b) { return limpia(b).length - limpia(a).length; };
+  var soloDig = function (v) { return limpia(v).replace(/[^0-9\/]/g, ""); };
+
+  var material = (op.familias || []).slice().sort(porLargo)
+    .filter(function (f) { return d.indexOf(limpia(f)) >= 0; })[0] || "";
+
+  var tipo = (op.tipos || []).slice().sort(porLargo)
+    .filter(function (t) { return d.indexOf(limpia(t)) >= 0; })[0] || "";
+
+  var cantidad = null, diamRaw = null;
+  var mQD = d.match(/(\d+(?:[.,]\d+)?)?\s*[ØO]\s*(\d+(?:\/\d+)?)/);
+  if (mQD) {
+    if (mQD[1]) cantidad = Number(mQD[1].replace(",", "."));
+    diamRaw = soloDig(mQD[2]);
+  }
+  if (!diamRaw) {
+    var mD = d.match(/(\d+(?:\/\d+)?)\s*"/) || d.match(/(\d+(?:\/\d+)?)\s*PULGADAS?/);
+    if (mD) diamRaw = soloDig(mD[1]);
+  }
+  var diam = diamRaw
+    ? (op.diametros || []).filter(function (v) { return soloDig(v) === diamRaw; })[0] || ""
+    : "";
+
+  if (!material && !diam) return null;
+
+  if (cantidad === null) {
+    var mc = d.match(/\bEN\s+(\d+(?:[.,]\d+)?)\b/) ||
+             d.match(/(\d+(?:[.,]\d+)?)\s*(?:ML|MTS?|METROS?)\b/);
+    cantidad = mc ? Number(mc[1].replace(",", ".")) : 1;
+  }
+  if (!cantidad) cantidad = 1;
+
+  return { material: material, tipo: tipo, diam: diam, cantidad: cantidad };
+}
+
 /* Compone una fila de tubería. Réplica de la sección 5.2 del proceso actual. */
 function componerTuberia(cat, fila) {
   var d = (cat && cat.comp && cat.comp.tuberia) || [];
@@ -316,6 +354,39 @@ function listaCables(cat) {
       codMo: codClave(r["Codigo mano de obra"]), nomMo: txt(r["nombre mano de obra"])
     };
   }).filter(function (c) { return c.cod && c.desc; });
+}
+
+function materialCableDe(descripcion) {
+  var d = limpia(descripcion);
+  if (d.indexOf("ALUMINIO") >= 0) return "ALUMINIO";
+  if (d.indexOf("COBRE") >= 0) return "COBRE";
+  return null;
+}
+
+function cableParaCalibre(cables, calibre, material) {
+  var candidatos = cables.filter(function (c) { return calibreDe(c.desc) === calibre; });
+  if (!candidatos.length) return null;
+  if (material) {
+    var conMat = candidatos.filter(function (c) { return limpia(c.desc).indexOf(material) >= 0; });
+    if (conMat.length) return conMat[0];
+  }
+  return candidatos[0];
+}
+
+function parsearCableado(descripcion, cables) {
+  var re = /(\d+)\s*No\.?\s*(\d+(?:\/\d+)?)\s*(?:AWG)?\s*\(\s*([FNT])\s*\)/gi;
+  var material = materialCableDe(descripcion);
+  var roles = { F: "fase", N: "neutro", T: "tierra" };
+  var out = {}, m;
+  while ((m = re.exec(descripcion))) {
+    var cant = Number(m[1]) || 0;
+    var rol = roles[m[3].toUpperCase()];
+    if (!rol || cant <= 0) continue;
+    var cable = cableParaCalibre(cables, m[2], material);
+    if (!cable) continue;
+    out[rol] = { cod: cable.cod, cant: cant };
+  }
+  return Object.keys(out).length ? out : null;
 }
 
 function bornaPorCalibre(cat, calibre) {

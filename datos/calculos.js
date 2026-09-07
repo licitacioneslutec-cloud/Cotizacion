@@ -153,6 +153,9 @@ function leerLibro(buffer) {
 function normalizarProyecto(p) {
   if (!p) return p;
   if (!p.preciosLocales) p.preciosLocales = {};
+  if (p.anticipo === undefined) p.anticipo = 30;
+  if (p.avance === undefined) p.avance = 70;
+  if (p.validezDias === undefined) p.validezDias = 45;
   if (!p.hojas) return p;
   p.hojas.forEach(function (h) {
     if (!h.filas) { h.filas = []; return; }

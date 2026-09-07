@@ -124,6 +124,11 @@ try {
   db = null;
 }
 
+var Perfil = {
+  leer: function () { try { return JSON.parse(localStorage.getItem("apu.perfil")); } catch (e) { return null; } },
+  guardar: function (p) { localStorage.setItem("apu.perfil", JSON.stringify(p)); Nube.yo = p.nombre || ""; }
+};
+
 var CLAVE = "apu.proyectos.v1";
 
 /* Lista de verificación, la misma que se lleva en el tablero de licitaciones */

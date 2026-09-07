@@ -256,6 +256,7 @@ function enlazarInsumos(p) {
     el.onchange = function () {
       if (!p.proveedores) p.proveedores = {};
       p.proveedores[el.dataset.iprov] = Number(el.value);
+      if (p.preciosLocales) delete p.preciosLocales[el.dataset.iprov];
       Store.guardar(p);
       var y = window.scrollY; render(); window.scrollTo(0, y);
     };
@@ -369,6 +370,20 @@ function vEntrega(p) {
           : "El material lleva IVA; la mano de obra lleva AIU con su IVA sobre la utilidad. El cliente ve las dos columnas.") +
       '</p></div></div>' +
 
+    '<div class="card"><div class="chd"><span class="ct">Forma de pago y presentación</span></div><div class="cbd">' +
+      '<div class="g g2">' +
+        '<div><label class="lbl" for="ent-anticipo">Anticipo %</label>' +
+          '<input class="in m" type="number" min="0" max="100" step="1" id="ent-anticipo" value="' + (p.anticipo || 0) + '"></div>' +
+        '<div><label class="lbl" for="ent-validez">Validez (días)</label>' +
+          '<input class="in m" type="number" min="0" step="1" id="ent-validez" value="' + (p.validezDias || 0) + '"></div>' +
+      '</div>' +
+      '<p style="margin:8px 0 0;font-size:12px;color:var(--ink3)">Avance de obra: ' + (100 - (p.anticipo || 0)) + '% (100 − anticipo, automático)</p>' +
+      '<div class="dl" style="margin-top:12px">' +
+        '<div class="dlr"><span class="dlk">' + (p.anticipo || 0) + '% ANTICIPO</span><span class="dlv m">' + cop(t.total * (p.anticipo || 0) / 100) + '</span></div>' +
+        '<div class="dlr"><span class="dlk">' + (100 - (p.anticipo || 0)) + '% AVANCE DE OBRA</span><span class="dlv m">' + cop(t.total * (100 - (p.anticipo || 0)) / 100) + '</span></div>' +
+      '</div>' +
+    '</div></div>' +
+
     '<div class="card"><div class="chd"><span class="ct">Valor de la oferta</span>' +
       '<span class="cn">' + t.conValor + ' de ' + (t.conValor + t.sinValor) + ' ítems con valor</span></div>' +
       '<div class="cbd">' +
@@ -396,5 +411,16 @@ function enlazarEntrega(p) {
   if (e) e.onclick = function () { exportarTodo(p); };
   var pd = document.getElementById("exp-pdf");
   if (pd) pd.onclick = function () { imprimirPropuesta(p); };
+  var an = document.getElementById("ent-anticipo");
+  if (an) an.onchange = function () {
+    p.anticipo = Number(this.value) || 0;
+    p.avance = 100 - p.anticipo;
+    Store.guardar(p); render();
+  };
+  var val = document.getElementById("ent-validez");
+  if (val) val.onchange = function () {
+    p.validezDias = Number(this.value) || 0;
+    Store.guardar(p); render();
+  };
 }
 

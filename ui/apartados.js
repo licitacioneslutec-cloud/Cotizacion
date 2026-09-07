@@ -139,7 +139,8 @@ function panelApu(p, cat, act) {
     }).join("");
 
     formTU = '<div class="card"><div class="chd"><span class="ct">Tuberías</span>' +
-      '<span class="cn">' + filasTU.length + (filasTU.length === 1 ? " línea" : " líneas") + '</span></div>' +
+      '<span class="cn" style="display:flex;align-items:center;gap:8px">' + filasTU.length + (filasTU.length === 1 ? " línea" : " líneas") +
+      '<button class="btn btnmini" id="autoTU" type="button">Auto-llenar</button></span></div>' +
       '<div class="cbd">' + (bloques || '<p style="margin:0 0 12px;font-size:13px;color:var(--ink2)">' +
         'Sin líneas todavía.</p>') +
       '<button class="btn" id="masTU">+ Agregar tubería</button></div></div>';
@@ -309,7 +310,8 @@ function panelApu(p, cat, act) {
     }).join("");
 
     formCA = '<div class="card"><div class="chd"><span class="ct">Cableados</span>' +
-      '<span class="cn">' + filasCA.length + (filasCA.length === 1 ? " acometida" : " acometidas") + '</span></div>' +
+      '<span class="cn" style="display:flex;align-items:center;gap:8px">' + filasCA.length + (filasCA.length === 1 ? " acometida" : " acometidas") +
+      '<button class="btn btnmini" id="autoCA" type="button">Auto-llenar</button></span></div>' +
       '<div class="cbd">' + (bloquesCA || '<p style="margin:0 0 12px;font-size:13px;color:var(--ink2)">Sin acometidas todav\u00eda.</p>') +
       '<button class="btn" id="masCA">+ Agregar acometida</button></div></div>';
   }
@@ -645,6 +647,30 @@ function enlazarPanel(p) {
     };
   });
 
+  var autoTU = document.getElementById("autoTU");
+  if (autoTU) autoTU.onclick = function () {
+    var cat = Catalogo.leer();
+    var d = datosDe(p, act.apu);
+    if (!d.TU) d.TU = [];
+    var op = opcionesTuberia(cat);
+    var agregadas = 0;
+    act.items.forEach(function (it) {
+      var r = parsearTuberia(it.desc, op);
+      if (!r) return;
+      var yaEsta = d.TU.some(function (f) {
+        return f.material === r.material && f.tipo === r.tipo && f.diam === r.diam;
+      });
+      if (yaEsta) return;
+      d.TU.push(r);
+      agregadas++;
+    });
+    if (!agregadas) { avisoError("No se reconoció ninguna tubería en la descripción de este ítem."); return; }
+    Store.guardar(p);
+    refrescarPanel(p);
+    avisoOk("Se agregó" + (agregadas === 1 ? "" : "n") + " " + agregadas +
+      (agregadas === 1 ? " línea" : " líneas") + " de tubería.");
+  };
+
   Array.prototype.forEach.call(document.querySelectorAll("[data-tu]"), function (el) {
     var clave = el.dataset.tu;
     var partes = clave.split("|");
@@ -820,6 +846,38 @@ function enlazarPanel(p) {
       Store.guardar(p); refrescarPanel(p);
     };
   });
+  var autoCA = document.getElementById("autoCA");
+  if (autoCA) autoCA.onclick = function () {
+    var cat = Catalogo.leer();
+    var d = datosDe(p, act.apu);
+    if (!d.CA) d.CA = [];
+    var cables = listaCables(cat);
+    var met = 0, rep = act.items.length;
+    act.items.forEach(function (it) { met += Number(it.cant) || 0; });
+    var agregadas = 0;
+    act.items.forEach(function (it) {
+      var r = parsearCableado(it.desc, cables);
+      if (!r) return;
+      var yaEsta = d.CA.some(function (f) {
+        return (r.fase ? f.fase === r.fase.cod : true) &&
+               (r.neutro ? f.neutro === r.neutro.cod : true) &&
+               (r.tierra ? f.tierra === r.tierra.cod : true);
+      });
+      if (yaEsta) return;
+      var fila = { nombre: it.desc.slice(0, 60), fase: "", cantFase: "", neutro: "", cantNeutro: "",
+                   tierra: "", cantTierra: "", metrado: met || 1, repite: rep || 1, bornas: false };
+      if (r.fase) { fila.fase = r.fase.cod; fila.cantFase = r.fase.cant; }
+      if (r.neutro) { fila.neutro = r.neutro.cod; fila.cantNeutro = r.neutro.cant; }
+      if (r.tierra) { fila.tierra = r.tierra.cod; fila.cantTierra = r.tierra.cant; }
+      d.CA.push(fila);
+      agregadas++;
+    });
+    if (!agregadas) { avisoError("No se reconoció ningún cableado en la descripción de este ítem."); return; }
+    Store.guardar(p);
+    refrescarPanel(p);
+    avisoOk("Se agregó" + (agregadas === 1 ? "" : "n") + " " + agregadas +
+      (agregadas === 1 ? " acometida" : " acometidas") + ".");
+  };
   Array.prototype.forEach.call(document.querySelectorAll("[data-cachk]"), function (c) {
     c.onchange = function () {
       var d = datosDe(p, act.apu);
