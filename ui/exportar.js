@@ -394,8 +394,8 @@ function exportarTodo(p) {
         var comma = perfil.firma.indexOf(",");
         var b64 = comma >= 0 ? perfil.firma.slice(comma + 1) : perfil.firma;
         var imgFirma = wb.addImage({ base64: b64, extension: "png" });
-        m.addImage(imgFirma, { tl: { col: 1, row: fila - 1 }, ext: { width: 140, height: 60 } });
-        fila += 4;
+        m.addImage(imgFirma, { tl: { col: 1, row: fila - 1 }, ext: { width: 420, height: 180 } });
+        fila += 10;
       } catch (e) {}
     }
     if (perfil.nombre) { m.getCell("B" + fila).value = perfil.nombre;
