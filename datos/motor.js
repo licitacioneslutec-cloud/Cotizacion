@@ -36,11 +36,13 @@ function parsearTuberia(descripcion, opciones) {
   var porLargo = function (a, b) { return limpia(b).length - limpia(a).length; };
   var soloDig = function (v) { return limpia(v).replace(/[^0-9\/]/g, ""); };
 
+  var sinGuion = function (s) { return limpia(s).replace(/_/g, ""); };
+  var dSinGuion = sinGuion(d);
   var material = (op.familias || []).slice().sort(porLargo)
-    .filter(function (f) { return d.indexOf(limpia(f)) >= 0; })[0] || "";
+    .filter(function (f) { return dSinGuion.indexOf(sinGuion(f)) >= 0; })[0] || "";
 
   var tipo = (op.tipos || []).slice().sort(porLargo)
-    .filter(function (t) { return d.indexOf(limpia(t)) >= 0; })[0] || "";
+    .filter(function (t) { return dSinGuion.indexOf(sinGuion(t)) >= 0; })[0] || "";
 
   var cantidad = null, diamRaw = null;
   var mQD = d.match(/(\d+(?:[.,]\d+)?)?\s*[ØO]\s*(\d+[\s.\-]\d+\/\d+|\d+(?:\/\d+)?)/);
@@ -389,7 +391,12 @@ function cableParaCalibre(cables, calibre, material, recubrimiento) {
     if (conRec.length) candidatos = conRec;
   }
   if (material) {
-    var conMat = candidatos.filter(function (c) { return limpia(c.desc).indexOf(material) >= 0; });
+    var conMat = candidatos.filter(function (c) {
+      var d = limpia(c.desc);
+      if (material === "COBRE") return d.indexOf("COBRE") >= 0 || /\bCU\b/.test(d);
+      if (material === "ALUMINIO") return d.indexOf("ALUMINIO") >= 0 || /\bAL\b/.test(d);
+      return d.indexOf(material) >= 0;
+    });
     if (conMat.length) return conMat[0];
   }
   return candidatos[0];

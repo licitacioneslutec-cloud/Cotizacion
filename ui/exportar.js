@@ -163,7 +163,7 @@ function imprimirPropuesta(p) {
       (p.validezDias || 0) + ' días calendario.</p>' +
     (perfil.firma || perfil.nombre || perfil.cargo
       ? '<div style="margin-top:18px">' +
-          (perfil.firma ? '<img src="' + esc(perfil.firma) + '" style="max-width:160px;max-height:70px;display:block">' : "") +
+          (perfil.firma ? '<img src="' + esc(perfil.firma) + '" style="max-width:640px;max-height:280px;display:block">' : "") +
           (perfil.nombre ? '<div style="font-weight:600;margin-top:4px">' + esc(perfil.nombre) + '</div>' : "") +
           (perfil.cargo ? '<div style="font-size:11px;color:var(--ink2)">' + esc(perfil.cargo) + '</div>' : "") +
         '</div>'
@@ -394,8 +394,8 @@ function exportarTodo(p) {
         var comma = perfil.firma.indexOf(",");
         var b64 = comma >= 0 ? perfil.firma.slice(comma + 1) : perfil.firma;
         var imgFirma = wb.addImage({ base64: b64, extension: "png" });
-        m.addImage(imgFirma, { tl: { col: 1, row: fila - 1 }, ext: { width: 420, height: 180 } });
-        fila += 10;
+        m.addImage(imgFirma, { tl: { col: 1, row: fila - 1 }, ext: { width: 560, height: 240 } });
+        fila += 13;
       } catch (e) {}
     }
     if (perfil.nombre) { m.getCell("B" + fila).value = perfil.nombre;
