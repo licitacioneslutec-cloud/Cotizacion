@@ -70,27 +70,31 @@ function renderSync() {
     '<header class="top"><div class="wrap topin"><div>' +
       '<div class="brand">Trabajo en equipo</div>' +
       '<h1 class="d h1">Sincronización</h1>' +
-      '<div class="sub">Los proyectos y el catálogo se guardan en la nube de la empresa</div>' +
+      '<div class="sub">El catálogo de insumos se sincroniza con la nube cada 30 minutos</div>' +
     '</div></div></header>' +
     '<main class="wrap main">' +
       '<div class="card"><div class="cbd">' +
+        '<div class="ct" style="margin-bottom:8px">Catálogo en la nube</div>' +
         '<div class="field"><label class="lbl" for="synyo">Tu nombre</label>' +
           '<input class="in" id="synyo" placeholder="Para que el equipo sepa quién edita" value="' +
           esc(Nube.yo || "") + '"></div>' +
         '<label class="lbl" style="margin-top:6px"><input type="checkbox" id="synon"' +
-          (on ? " checked" : "") + '> Guardar en la nube y ver lo que hacen los demás</label>' +
+          (on ? " checked" : "") + '> Sincronizar catálogo con la nube (cada 30 min)</label>' +
         '<div id="synmsg" style="margin-top:14px"></div>' +
         '<div class="btnrow" style="margin-top:14px">' +
           '<button class="btn" id="synprobar">Probar conexión</button>' +
-          '<button class="btn" id="synbajar">Traer todo de la nube</button>' +
-          '<button class="btn" id="synsubir">Subir todo a la nube</button>' +
+          '<button class="btn" id="synbajar">Traer catálogo de la nube</button>' +
+          '<button class="btn" id="synsubir">Subir catálogo a la nube</button>' +
         '</div>' +
       '</div></div>' +
-      '<div class="note"><div class="notet">Cómo funciona</div>' +
-      '<div class="noteb">Cada proyecto se guarda por separado, así dos personas en proyectos distintos ' +
-      'nunca se pisan. Al abrir uno que otro tiene abierto, te avisa. Todo se guarda primero en tu equipo ' +
-      'y luego en la nube, de modo que si se cae internet puedes seguir trabajando y se sube cuando vuelva. ' +
-      'No hay contraseña: quien tenga la dirección de la aplicación ve los proyectos.</div></div>' +
+      '<div class="note"><div class="notet">Cómo funciona ahora</div>' +
+      '<div class="noteb"><strong>Catálogo de insumos:</strong> se sincroniza automáticamente cada 30 minutos ' +
+      'con la nube de la empresa. También puedes sincronizarlo manualmente con los botones de arriba o desde ' +
+      'la pantalla de Proyectos.</div>' +
+      '<div class="noteb" style="margin-top:8px"><strong>Proyectos:</strong> cada proyecto vive en tu equipo. ' +
+      'Para compartir un proyecto con otro computador, usa <strong>Respaldo</strong> en la lista de proyectos ' +
+      'para descargar el archivo JSON, ponlo en la carpeta compartida del Drive, y en el otro equipo usa ' +
+      '<strong>Restaurar</strong> para cargarlo. Así cada quien decide qué proyectos trae y no se pisan.</div></div>' +
     '</main>';
   enlazarTop();
 
@@ -105,13 +109,12 @@ function renderSync() {
     Sync.marca(this.checked ? "sync" : "");
     if (this.checked) {
       var m = document.getElementById("synmsg");
-      if (m) m.innerHTML = '<div class="ok">Sincronización encendida. Trayendo lo que haya en la nube…</div>';
+      if (m) m.innerHTML = '<div class="ok">Sincronización encendida. Trayendo catálogo…</div>';
       Sync.bajarTodo().then(function (res) {
         render();
         var mm = document.getElementById("synmsg");
-        if (mm && res && res.ok) mm.innerHTML = '<div class="ok">Todo al día: catálogo ' +
-          (res.catalogo || res.sembrado ? "sincronizado" : "sin cambios") + ' y ' + res.nProy +
-          (res.nProy === 1 ? " proyecto." : " proyectos.") + '</div>';
+        if (mm && res && res.ok) mm.innerHTML = '<div class="ok">Al día: catálogo ' +
+          (res.catalogo || res.sembrado ? "sincronizado" : "sin cambios") + '.</div>';
       });
     }
   };
@@ -119,15 +122,10 @@ function renderSync() {
   if (pr) pr.onclick = function () {
     var m = document.getElementById("synmsg");
     if (m) m.innerHTML = '<div class="note" style="margin:0"><div class="noteb">Probando…</div></div>';
-    Promise.all([
-      Nube.leer("catalogo").catch(function () { return null; }),
-      Nube.leer("proyectos").catch(function () { return null; })
-    ]).then(function (r) {
-      var n = r[0] && r[0].items ? r[0].items.length : 0;
-      var np = r[1] ? Object.keys(r[1]).length : 0;
+    Nube.leer("catalogo").then(function (cat) {
+      var n = cat && cat.items ? cat.items.length : 0;
       if (m) m.innerHTML = '<div class="ok">Conexión correcta. En la nube hay ' +
-        (n ? "un catálogo de " + n + " insumos" : "todavía sin catálogo") +
-        ' y ' + np + (np === 1 ? " proyecto." : " proyectos.") + '</div>';
+        (n ? "un catálogo de " + n + " insumos." : "todavía sin catálogo.") + '</div>';
     }).catch(function (e) {
       if (m) m.innerHTML = '<div class="err">No se pudo conectar: ' + esc(e.message) +
         '. Revisa que la base esté en modo prueba y que la dirección sea correcta.</div>';
@@ -136,18 +134,17 @@ function renderSync() {
   var sb = document.getElementById("synsubir");
   if (sb) sb.onclick = function () {
     if (!Sync.encendida()) { avisoError("Primero enciende la sincronización."); return; }
-    if (!confirm("Subir tu catálogo y todos tus proyectos a la nube, reemplazando lo que haya allá. ¿Seguir?")) return;
+    if (!confirm("Subir tu catálogo a la nube, reemplazando el que haya allá. ¿Seguir?")) return;
     var m = document.getElementById("synmsg");
     if (m) m.innerHTML = '<div class="note" style="margin:0"><div class="noteb">Subiendo…</div></div>';
     var cat = Catalogo.leer();
     var tareas = [];
     if (cat && cat.items) tareas.push(Nube.escribir("catalogo", cat));
-    Store.todos().forEach(function (pp) { tareas.push(Nube.escribir("proyectos/" + pp.id, pp)); });
     tareas.push(Nube.escribir("plantillas", Plantillas.leer()));
     Promise.all(tareas).then(function () {
       Sync.marca("ok");
-      if (m) m.innerHTML = '<div class="ok">Se subió todo: catálogo de ' +
-        (cat && cat.items ? cat.items.length : 0) + ' insumos y ' + Store.todos().length + ' proyectos.</div>';
+      if (m) m.innerHTML = '<div class="ok">Catálogo subido: ' +
+        (cat && cat.items ? cat.items.length : 0) + ' insumos.</div>';
     }).catch(function (e) {
       Sync.marca("err");
       if (m) m.innerHTML = '<div class="err">Falló la subida: ' + esc(e && e.message ? e.message : "sin conexión") + '</div>';
@@ -157,12 +154,10 @@ function renderSync() {
   var bj = document.getElementById("synbajar");
   if (bj) bj.onclick = function () {
     if (!Sync.encendida()) { avisoError("Primero enciende la sincronización."); return; }
-    if (!confirm("Traer proyectos y catálogo de la nube. Si algo local es más viejo, se actualiza. ¿Seguir?")) return;
     Sync.bajarTodo().then(function (res) {
       render();
       if (res && res.ok) {
-        avisoOk("Al día con la nube: catálogo " + (res.catalogo ? "actualizado" : "sin cambios") +
-          ", " + res.nProy + (res.nProy === 1 ? " proyecto." : " proyectos.") +
+        avisoOk("Al día con la nube: catálogo " + (res.catalogo ? "actualizado" : "sin cambios") + "." +
           (res.sembrado ? " Se subió tu catálogo a la nube." : ""));
       } else avisoError("No se pudo traer de la nube. Revisa la conexión.");
     });
@@ -244,11 +239,10 @@ IDB.abrir().then(function () {
   _cachePlan = r[3] || [];
   render();
   if (Sync.encendida()) {
-    Sync.escucharCatalogo();
-    Sync.escucharProyectos();
+    Sync.iniciarTimer();
     Sync.bajarTodo().then(function (res) {
       render();
-      if (res && res.ok && (res.catalogo || res.nProy)) Sync.marca("ok");
+      if (res && res.ok && res.catalogo) Sync.marca("ok");
     });
   }
 }).catch(function () {

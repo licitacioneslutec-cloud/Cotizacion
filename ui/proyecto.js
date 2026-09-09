@@ -35,6 +35,7 @@ function renderProyectos() {
         '<a class="enlace" href="https://www.lutec.com.co/" target="_blank" rel="noopener">lutec.com.co</a></div></div>' +
       '</div>' +
       '<div class="btnrow">' +
+        (Sync.encendida() ? '<button class="btn" id="synccatalogo">Sincronizar catálogo</button>' : '') +
         '<button class="btn" id="exportall">Respaldo completo</button>' +
         '<button class="btn" id="importar">Restaurar</button>' +
         '<button class="btn btnp" id="nuevo">Nuevo proyecto</button>' +
@@ -46,15 +47,26 @@ function renderProyectos() {
         : '<div class="card"><div class="empty">' +
           '<div class="dropt">Todavía no hay proyectos</div>' +
           'Crea el primero y sube el anexo de cantidades del cliente.</div></div>') +
-      '<div class="note"><div class="notet">Cómo llevarlo a otro equipo</div>' +
-      '<div class="noteb"><strong>Respaldo completo</strong> baja un archivo con el catálogo, los precios ' +
-      'y todos los proyectos. En el otro equipo, abre la misma dirección y pulsa <strong>Restaurar</strong>. ' +
-      'Queda todo igual. Ten en cuenta que no es sincronización: si los dos trabajan a la vez, cada uno ' +
-      'avanza por su lado y el último respaldo que se restaure pisa al otro.</div></div>' +
+      '<div class="note"><div class="notet">Cómo compartir proyectos</div>' +
+      '<div class="noteb"><strong>Respaldo</strong> (por proyecto) o <strong>Respaldo completo</strong> baja un archivo JSON. ' +
+      'Ponlo en la carpeta compartida del Drive y en el otro equipo usa <strong>Restaurar</strong> para cargarlo. ' +
+      'Cada quien decide qué proyectos trae, así no se pisan.</div>' +
+      '<div class="noteb" style="margin-top:6px"><strong>El catálogo de insumos</strong> se sincroniza automáticamente ' +
+      'con la nube cada 30 minutos. También puedes forzarlo con el botón <em>Sincronizar catálogo</em>.</div></div>' +
       '<input type="file" id="fimport" accept="application/json,.json" class="hide">' +
     '</main>';
 
   enlazarTop();
+  var syncBtn = document.getElementById("synccatalogo");
+  if (syncBtn) syncBtn.onclick = function () {
+    syncBtn.disabled = true;
+    syncBtn.textContent = "Sincronizando…";
+    Sync.bajarCatalogo().then(function (cambio) {
+      syncBtn.disabled = false;
+      syncBtn.textContent = "Sincronizar catálogo";
+      avisoOk(cambio ? "Catálogo actualizado desde la nube." : "Catálogo ya está al día.");
+    });
+  };
   document.getElementById("nuevo").onclick = function () {
     vista.borrador = { nombre: "", cliente: "", ciudad: "", recibo: hoy(), entrega: "",
                        constructora: "", encargado: "", entregaObs: "", tipo: "", hojas: null, archivo: "" };
@@ -120,21 +132,7 @@ function renderProyectos() {
   Array.prototype.forEach.call(document.querySelectorAll("[data-abrir]"), function (b) {
     b.onclick = function () {
       var pid = b.dataset.abrir;
-      var abrir = function () {
-        var pp = Store.leer(pid);
-        if (pp) pp.baseModificado = pp.modificado;   /* referencia para detectar conflictos al guardar */
-        ir({ pantalla: "proyecto", pid: pid, paso: "ficha", hoja: 0, sel: [], apu: null });
-        Sync.avisarAbierto(pid);
-      };
-      if (Sync.encendida()) {
-        Sync.quienAbrio(pid).then(function (q) {
-          if (q && q.quien) {
-            if (!confirm(q.quien + " tiene este proyecto abierto (hace " + q.minutos + " min). " +
-              "Pueden pisarse los cambios si trabajan a la vez. ¿Abrir de todos modos?")) return;
-          }
-          Sync.bajarProyecto(pid).then(abrir);
-        });
-      } else abrir();
+      ir({ pantalla: "proyecto", pid: pid, paso: "ficha", hoja: 0, sel: [], apu: null });
     };
   });
   Array.prototype.forEach.call(document.querySelectorAll("[data-borrar]"), function (b) {
