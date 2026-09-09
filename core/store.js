@@ -23,7 +23,6 @@ var Store = {
     if (i >= 0) lista[i] = proy; else lista.unshift(proy);
     _cacheProy = lista;
     IDB.guardarProyecto(proy);
-    Sync.subirProyecto(proy);
     return true;
   },
   leer: function (pid) {
@@ -35,7 +34,6 @@ var Store = {
     var lista = Store.todos().filter(function (p) { return p.id !== pid; });
     _cacheProy = lista;
     IDB.borrarProyecto(pid);
-    Sync.borrarProyecto(pid);
   }
 };
 /* Catálogo de insumos, compartido por todos los proyectos */
