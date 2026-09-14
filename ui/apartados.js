@@ -95,14 +95,21 @@ function listaApu(p, lista, act) {
   return lista.map(function (a) {
     var d = p.datosApu && p.datosApu[a.apu];
     var listo = d && d.TU && d.TU.length;
-    return '<button class="arow" data-apu="' + a.apu + '" aria-current="' + (a.apu === act.apu) + '">' +
+    var cantTotal = a.items.reduce(function (s, x) { return s + (Number(x.cant) || 0); }, 0);
+    var undTotal = a.items[0] ? a.items[0].und : "";
+    var togs = APARTADOS.map(function (ap) {
+      var activo = a.cod.indexOf(ap.id) >= 0;
+      return '<button class="tog" data-aptog="' + a.apu + '|' + ap.id + '" aria-pressed="' + activo +
+        '" title="' + ap.nombre + '">' + ap.id + '</button>';
+    }).join("");
+    return '<div class="arow" data-apu="' + a.apu + '" aria-current="' + (a.apu === act.apu) + '">' +
       '<div class="an"><span class="anum">APU ' + a.apu + '</span><span>' +
-        a.cod.map(function (c) { return '<span class="chip">' + c + '</span>'; }).join("") +
         (listo ? '<span class="pt" title="con datos"></span>' : "") + '</span></div>' +
       '<div class="ad" title="' + esc(a.items[0].desc) + '">' + esc(a.items[0].desc) + '</div>' +
-      (a.items.length > 1 ? '<div class="anum" style="color:var(--limedk);margin-top:3px">' +
-        a.items.length + ' ítems del anexo</div>' : "") +
-    '</button>';
+      '<div style="font-size:11px;color:var(--ink3);margin-top:3px">' +
+        fmt(cantTotal) + ' ' + esc(undTotal) + ' · ' + a.items.length + (a.items.length === 1 ? ' ítem' : ' ítems') + '</div>' +
+      '<div class="celtog" style="margin-top:5px">' + togs + '</div>' +
+    '</div>';
   }).join("");
 }
 
@@ -613,6 +620,31 @@ function refrescarPanel(p, foco) {
 function enlazarLista(p) {
   Array.prototype.forEach.call(document.querySelectorAll("[data-apu]"), function (b) {
     b.onclick = function () { vista.apu = Number(b.dataset.apu); refrescarPanel(p); };
+  });
+
+  Array.prototype.forEach.call(document.querySelectorAll("[data-aptog]"), function (b) {
+    b.onclick = function (e) {
+      e.stopPropagation();
+      var partes = b.dataset.aptog.split("|");
+      var apuNum = Number(partes[0]);
+      var apId = partes[1];
+      var lista = analisisDe(p);
+      var apu = null;
+      for (var i = 0; i < lista.length; i++) {
+        if (lista[i].apu === apuNum) { apu = lista[i]; break; }
+      }
+      if (!apu) return;
+      var todosLaTienen = apu.items.every(function (f) { return f.cod.indexOf(apId) >= 0; });
+      apu.items.forEach(function (f) {
+        var idx = f.cod.indexOf(apId);
+        if (todosLaTienen) {
+          if (idx >= 0) f.cod.splice(idx, 1);
+        } else {
+          if (idx < 0) f.cod.push(apId);
+        }
+      });
+      Store.guardar(p); refrescarPanel(p);
+    };
   });
 
   var fa = document.getElementById("filtroapu");

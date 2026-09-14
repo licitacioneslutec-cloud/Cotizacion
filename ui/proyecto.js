@@ -1,5 +1,62 @@
 "use strict";
 
+var _autoRespaldoTimer = null;
+
+function guardarRespaldoEnCarpeta(p) {
+  if (!window._dirRespaldo || !p) return Promise.resolve(false);
+  var nombre = (p.nombre || "proyecto").replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "_");
+  return window._dirRespaldo.getDirectoryHandle(nombre, { create: true }).then(function (subDir) {
+    return subDir.getFileHandle(nombre + ".json", { create: true });
+  }).then(function (fileHandle) {
+    return fileHandle.createWritable();
+  }).then(function (writable) {
+    return writable.write(JSON.stringify(p, null, 2)).then(function () { return writable.close(); });
+  }).then(function () { return true; })
+    .catch(function (e) { console.warn("Auto-respaldo falló:", e); return false; });
+}
+
+function iniciarAutoRespaldo() {
+  if (_autoRespaldoTimer) clearInterval(_autoRespaldoTimer);
+  _autoRespaldoTimer = setInterval(function () {
+    if (!window._dirRespaldo) return;
+    if (vista.pantalla !== "proyectos" && vista.pid) {
+      var p = Store.leer(vista.pid);
+      if (p) guardarRespaldoEnCarpeta(p);
+    }
+  }, 5 * 60 * 1000);
+}
+
+function confirmarBorrado(nombre, callback) {
+  var overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.innerHTML =
+    '<div class="modal-borrar">' +
+      '<div class="modal-icono">⚠️</div>' +
+      '<h3 class="modal-titulo">Borrar proyecto</h3>' +
+      '<p class="modal-texto">Estás a punto de borrar <strong>' + nombre.replace(/</g, "&lt;") +
+        '</strong>. Esta acción <strong>no se puede deshacer</strong>.</p>' +
+      '<p class="modal-texto">Escribe el nombre del proyecto para confirmar:</p>' +
+      '<input class="in modal-input" id="confirmarNombre" placeholder="' + nombre.replace(/"/g, '&quot;') + '" autocomplete="off">' +
+      '<div class="btnrow" style="margin-top:14px;justify-content:flex-end">' +
+        '<button class="btn" id="cancelarBorrado">Cancelar</button>' +
+        '<button class="btn modal-btn-borrar" id="ejecutarBorrado" disabled>Borrar</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+  var inp = document.getElementById("confirmarNombre");
+  var btn = document.getElementById("ejecutarBorrado");
+  inp.oninput = function () {
+    btn.disabled = inp.value.trim() !== nombre.trim();
+  };
+  btn.onclick = function () {
+    document.body.removeChild(overlay);
+    callback();
+  };
+  document.getElementById("cancelarBorrado").onclick = function () {
+    document.body.removeChild(overlay);
+  };
+  inp.focus();
+}
 
 function renderProyectos() {
   var lista = Store.todos();
@@ -139,11 +196,10 @@ function renderProyectos() {
     b.onclick = function () {
       var p = Store.leer(b.dataset.borrar);
       if (!p) return;
-      if (confirm('Se borra "' + p.nombre + '" de este navegador y no se puede deshacer.\n\n' +
-                  'Si aún lo necesitas, descarga primero el respaldo. ¿Borrar de todos modos?')) {
+      confirmarBorrado(p.nombre, function () {
         Store.borrar(b.dataset.borrar);
         render();
-      }
+      });
     };
   });
   Array.prototype.forEach.call(document.querySelectorAll("[data-resp]"), function (b) {
@@ -465,6 +521,15 @@ function vFicha(p, r) {
       '</div></div>' +
     '</div>' +
 
+    '<div class="card"><div class="chd"><span class="ct">Respaldo automático</span></div><div class="cbd">' +
+      '<p style="font-size:13px;color:var(--ink2);margin:0 0 10px">Elige una carpeta para guardar respaldos automáticos cada 5 minutos. Se crea una subcarpeta por proyecto.</p>' +
+      '<div class="btnrow">' +
+        '<button class="btn btnp" id="elegirCarpeta">Elegir carpeta</button>' +
+        '<span id="carpetaElegida" style="font-size:12px;color:var(--ink2);margin-left:10px">' +
+          (window._dirRespaldo ? '📁 ' + (window._dirRespaldoNombre || 'Carpeta elegida') : 'Sin carpeta') + '</span>' +
+      '</div>' +
+    '</div></div>' +
+
     '<div class="card"><div class="chd"><span class="ct">Lista de verificación</span>' +
       '<span class="cn">' + CHECK.filter(function (c, j) { return (p.check || {})[j]; }).length +
       ' de ' + CHECK.length + '</span></div><div class="cbd">' +
@@ -547,16 +612,40 @@ function enlazarFicha(p) {
     el.oninput = function () { p.margenes[el.dataset.mg] = Number(el.value) || 0; guardar(); render(); };
   });
   document.getElementById("respaldo").onclick = function () {
-    var blob = new Blob([JSON.stringify(p, null, 2)], { type: "application/json" });
-    var a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = p.nombre.replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "_") + ".json";
-    a.click(); URL.revokeObjectURL(a.href);
+    if (window._dirRespaldo) {
+      guardarRespaldoEnCarpeta(p).then(function (ok) {
+        if (ok) avisoOk("Respaldo guardado en la carpeta.");
+        else avisoError("No se pudo guardar en la carpeta. Descargando...");
+      });
+    } else {
+      var blob = new Blob([JSON.stringify(p, null, 2)], { type: "application/json" });
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = p.nombre.replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "_") + ".json";
+      a.click(); URL.revokeObjectURL(a.href);
+    }
   };
   document.getElementById("borrar").onclick = function () {
-    if (confirm("Se borra el proyecto de este navegador. ¿Seguir?")) {
+    confirmarBorrado(p.nombre, function () {
       Store.borrar(p.id); ir({ pantalla: "proyectos" });
+    });
+  };
+  var elegirCarpeta = document.getElementById("elegirCarpeta");
+  if (elegirCarpeta) elegirCarpeta.onclick = function () {
+    if (!window.showDirectoryPicker) {
+      avisoError("Tu navegador no soporta elegir carpetas. Usa Chrome o Edge.");
+      return;
     }
+    window.showDirectoryPicker({ mode: "readwrite" }).then(function (dirHandle) {
+      window._dirRespaldo = dirHandle;
+      window._dirRespaldoNombre = dirHandle.name;
+      var label = document.getElementById("carpetaElegida");
+      if (label) label.textContent = "📁 " + dirHandle.name;
+      avisoOk("Carpeta elegida: " + dirHandle.name);
+      iniciarAutoRespaldo();
+    }).catch(function (e) {
+      if (e.name !== "AbortError") avisoError("No se pudo elegir la carpeta: " + e.message);
+    });
   };
 
   var btnSnap = document.getElementById("btnSnap");
@@ -823,7 +912,7 @@ function vArmado(p, r) {
   itemsDe(p).forEach(function (x) { if (x.f.apu) cuenta[x.f.apu] = (cuenta[x.f.apu] || 0) + 1; });
 
   var extraCols = (verPct ? 2 : 0) + (sep ? (verTot ? 4 : 2) : (verTot ? 2 : 1));
-  var colspan = 7 + extraCols + 1;
+  var colspan = 6 + extraCols + 1;
   var cuerpo = "", capPend = null, visibles = 0;
   h.filas.forEach(function (f, fi) {
     if (f.tipo === "cap") { capPend = { f: f, fi: fi }; return; }
@@ -846,14 +935,9 @@ function vArmado(p, r) {
     var desp = next && next.tipo === "it" && next.apu && next.apu === f.apu;
     var tie = comparte ? " class=\"tie" + (!antes ? " tietop" : (desp ? "" : " tiebot")) + "\"" : "";
 
-    var togs = APARTADOS.map(function (a) {
-      return '<button class="tog" data-ap="' + k + "|" + a.id + '" aria-pressed="' +
-        (f.cod.indexOf(a.id) >= 0) + '" title="' + a.nombre + '">' + a.id + '</button>';
-    }).join("");
-
     /* precio del análisis de este ítem: unitario y total (× cantidad de este ítem) */
     var a = f.apu ? (t.porApu[f.apu] || {}) : {};
-    var qf = Number(f.cant) || 0;
+    var qf = p.usarCantObs && f.cantObs ? (Number(f.cantObs) || 0) : (Number(f.cant) || 0);
 
     var celPct = '';
     if (verPct) {
@@ -895,9 +979,8 @@ function vArmado(p, r) {
                    : esc(f.item)) + '</td>' +
       '<td>' + (f.manual ? '<input class="in" style="width:100%" data-editdesc="' + k + '" value="' + esc(f.desc) + '">' : esc(f.desc)) + '</td>' +
       '<td style="color:var(--ink2)">' + esc(f.und) + '</td>' +
-      '<td class="num">' + fmt(f.cant) + '</td>' +
+      '<td class="num">' + (f.manual ? '<input class="in m" type="number" min="0" step="0.01" style="width:60px;text-align:right" data-editcant="' + k + '" value="' + (f.cant || "") + '">' : fmt(f.cant)) + '</td>' +
       '<td><input class="in m" style="font-size:11px" data-cantobs="' + k + '" value="' + esc(f.cantObs || "") + '" placeholder="—"></td>' +
-      '<td class="celtog">' + togs + '</td>' +
       '<td' + tie + '><div class="apu' + (comparte ? " apudup" : "") + '">' +
         '<input class="in m inapu" data-apunum="' + k + '" value="' + (f.apu || "") +
           '" placeholder="—" title="Escribe un número para asignar o unir análisis">' +
@@ -944,6 +1027,11 @@ function vArmado(p, r) {
           '<label class="lbl" style="font-size:12px;cursor:pointer"><input type="checkbox" id="togsinapu"' +
             (vista.soloSinApu ? ' checked' : '') + '> Solo sin APU</label>' +
         '</div>' +
+        '<div style="display:flex;gap:12px;align-items:center;margin:4px 0">' +
+          '<button class="btn" id="copiarCantObs">Copiar cant → cant obs</button>' +
+          '<label class="lbl" style="font-size:12px;cursor:pointer"><input type="checkbox" id="togusarcantobs"' +
+            (p.usarCantObs ? ' checked' : '') + '> Multiplicar por cant obs</label>' +
+        '</div>' +
         '<input class="in infiltro" id="filtroarmado" placeholder="Filtrar por descripción o ítem" value="' +
           esc(vista.filtroArmado || "") + '">' +
         '<input class="in infiltro" id="filtroapuarmado" placeholder="Filtrar por nº de análisis" value="' +
@@ -954,7 +1042,7 @@ function vArmado(p, r) {
         '<th style="width:58px">Ítem</th><th>Descripción</th>' +
         '<th style="width:38px">Und</th><th style="width:56px" class="num">Cant.</th>' +
         '<th style="width:80px">Cant. OBS</th>' +
-        '<th style="width:210px">Apartados</th><th style="width:54px;text-align:center">Análisis</th>' +
+        '<th style="width:54px;text-align:center">Análisis</th>' +
         encPct + encPrecio +
       '</tr></thead><tbody>' + cuerpo + '</tbody></table></div>' + barra +
       '<div class="btnrow" style="margin:12px 0"><button class="btn" id="agregarItem">+ Agregar ítem</button>' +
@@ -962,8 +1050,8 @@ function vArmado(p, r) {
         '<button class="btn" id="agruparIguales" style="margin-left:8px">Agrupar iguales</button></div>' +
     '</div>' +
     '<div class="note"><div class="notet">Cómo se usa</div>' +
-    '<div class="noteb">Toca una sigla para decir a qué apartado va el ítem. Escribe el mismo número de ' +
-    'análisis en dos ítems para unirlos, o usa la selección para hacerlo en grupo. El precio de la derecha ' +
+    '<div class="noteb">Escribe el mismo número de análisis en dos ítems para unirlos, o usa la selección ' +
+    'para hacerlo en grupo. Los apartados se eligen en el paso 4. El precio de la derecha ' +
     'se actualiza a medida que armas cada análisis' + (sep ? ", separado en suministro y mano de obra." : ".") + '</div></div>';
 }
 
@@ -995,8 +1083,9 @@ function enlazarArmado(p) {
   });
   Array.prototype.forEach.call(document.querySelectorAll("[data-fila]"), function (tr) {
     tr.onclick = function (e) {
-      if (e.target.closest(".tog") || e.target.closest(".inapu") || e.target.matches("[data-sel]") ||
-          e.target.closest("[data-cantobs]") || e.target.closest("[data-edititem]") || e.target.closest("[data-editdesc]")) return;
+      if (e.target.closest(".inapu") || e.target.matches("[data-sel]") ||
+          e.target.closest("[data-cantobs]") || e.target.closest("[data-edititem]") || e.target.closest("[data-editdesc]") ||
+          e.target.closest("[data-editcant]")) return;
       var k = tr.dataset.fila, i = vista.sel.indexOf(k);
       if (i >= 0) vista.sel.splice(i, 1); else vista.sel.push(k);
       render();
@@ -1026,18 +1115,6 @@ function enlazarArmado(p) {
     };
     el.onkeydown = function (e) { if (e.key === "Enter") { e.preventDefault(); el.blur(); } };
   });
-  Array.prototype.forEach.call(document.querySelectorAll("[data-ap]"), function (b) {
-    b.onclick = function (e) {
-      e.stopPropagation();
-      var partes = b.dataset.ap.split("|");
-      var pos = partes[0].split(":");
-      var f = p.hojas[Number(pos[0])].filas[Number(pos[1])];
-      var ap = partes[1], i = f.cod.indexOf(ap);
-      if (i >= 0) f.cod.splice(i, 1); else f.cod.push(ap);
-      if (f.cod.length && !f.apu) f.apu = siguienteApu(p);
-      Store.guardar(p); render();
-    };
-  });
   Array.prototype.forEach.call(document.querySelectorAll("[data-cantobs]"), function (el) {
     el.onchange = function () {
       var q = el.dataset.cantobs.split(":");
@@ -1065,6 +1142,28 @@ function enlazarArmado(p) {
       if (f) { f.desc = el.value; Store.guardar(p); }
     };
   });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-editcant]"), function (el) {
+    el.onchange = function () {
+      var q = el.dataset.editcant.split(":");
+      var f = p.hojas[Number(q[0])].filas[Number(q[1])];
+      if (f) { f.cant = Number(el.value) || 0; Store.guardar(p); render(); }
+    };
+  });
+  var copiarBtn = document.getElementById("copiarCantObs");
+  if (copiarBtn) copiarBtn.onclick = function () {
+    var h = p.hojas[vista.hoja];
+    if (!h) return;
+    h.filas.forEach(function (f) {
+      if (f.tipo === "it") f.cantObs = String(Number(f.cant) || 0);
+    });
+    Store.guardar(p); render();
+  };
+  var togCantObs = document.getElementById("togusarcantobs");
+  if (togCantObs) togCantObs.onchange = function () {
+    p.usarCantObs = this.checked;
+    Store.guardar(p);
+    var y = window.scrollY; render(); window.scrollTo(0, y);
+  };
   var btnItem = document.getElementById("agregarItem");
   if (btnItem) btnItem.onclick = function () {
     var h = p.hojas[vista.hoja];
