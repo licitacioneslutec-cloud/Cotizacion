@@ -912,7 +912,7 @@ function vArmado(p, r) {
   itemsDe(p).forEach(function (x) { if (x.f.apu) cuenta[x.f.apu] = (cuenta[x.f.apu] || 0) + 1; });
 
   var extraCols = (verPct ? 2 : 0) + (sep ? (verTot ? 4 : 2) : (verTot ? 2 : 1));
-  var colspan = 6 + extraCols + 1;
+  var colspan = 7 + extraCols + 1;
   var cuerpo = "", capPend = null, visibles = 0;
   h.filas.forEach(function (f, fi) {
     if (f.tipo === "cap") { capPend = { f: f, fi: fi }; return; }
@@ -988,6 +988,10 @@ function vArmado(p, r) {
         (f.apu ? '<button class="btnx" data-irapu="' + f.apu + '" title="Ir al análisis ' + f.apu + '" style="font-size:10px;padding:0 4px;margin-left:2px">→</button>' : '') +
         '</div></td>' +
       celPct + celPrecio +
+      '<td class="celtog">' + APARTADOS.map(function (a) {
+        return '<button class="tog" data-ap="' + k + '|' + a.id + '" aria-pressed="' +
+          (f.cod.indexOf(a.id) >= 0) + '" title="' + a.nombre + '">' + a.id + '</button>';
+      }).join("") + '</td>' +
     '</tr>';
   });
 
@@ -1045,6 +1049,7 @@ function vArmado(p, r) {
         '<th style="width:80px">Cant. OBS</th>' +
         '<th style="width:54px;text-align:center">Análisis</th>' +
         encPct + encPrecio +
+        '<th>Apartados</th>' +
       '</tr></thead><tbody>' + cuerpo + '</tbody></table></div>' + barra +
       '<div class="btnrow" style="margin:12px 0"><button class="btn" id="agregarItem">+ Agregar ítem</button>' +
         '<button class="btn" id="agregarCap" style="margin-left:8px">+ Agregar capítulo</button>' +
@@ -1052,7 +1057,7 @@ function vArmado(p, r) {
     '</div>' +
     '<div class="note"><div class="notet">Cómo se usa</div>' +
     '<div class="noteb">Escribe el mismo número de análisis en dos ítems para unirlos, o usa la selección ' +
-    'para hacerlo en grupo. Los apartados se eligen en el paso 4. El precio de la derecha ' +
+    'para hacerlo en grupo. Los apartados se eligen aquí o en el paso 4. El precio de la derecha ' +
     'se actualiza a medida que armas cada análisis' + (sep ? ", separado en suministro y mano de obra." : ".") + '</div></div>';
 }
 
@@ -1084,7 +1089,7 @@ function enlazarArmado(p) {
   });
   Array.prototype.forEach.call(document.querySelectorAll("[data-fila]"), function (tr) {
     tr.onclick = function (e) {
-      if (e.target.closest(".inapu") || e.target.matches("[data-sel]") ||
+      if (e.target.closest(".inapu") || e.target.matches("[data-sel]") || e.target.closest(".tog") ||
           e.target.closest("[data-cantobs]") || e.target.closest("[data-edititem]") || e.target.closest("[data-editdesc]") ||
           e.target.closest("[data-editcant]") || e.target.closest("[data-nuevoapu]")) return;
       var k = tr.dataset.fila, i = vista.sel.indexOf(k);
@@ -1138,6 +1143,18 @@ function enlazarArmado(p) {
       f.apu = siguienteApu(p);
       if (!f.cod || !f.cod.length) f.cod = ["CA"];
       Store.guardar(p); render();
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-ap]"), function (b) {
+    b.onclick = function (e) {
+      e.stopPropagation();
+      var partes = b.dataset.ap.split("|");
+      var pos = partes[0].split(":");
+      var f = p.hojas[Number(pos[0])].filas[Number(pos[1])];
+      if (!f) return;
+      var id = partes[1], idx = f.cod.indexOf(id);
+      if (idx >= 0) f.cod.splice(idx, 1); else f.cod.push(id);
+      Store.guardar(p); var y = window.scrollY; render(); window.scrollTo(0, y);
     };
   });
   Array.prototype.forEach.call(document.querySelectorAll("[data-edititem]"), function (el) {
