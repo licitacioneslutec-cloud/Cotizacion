@@ -121,9 +121,13 @@ function imprimirPropuesta(p) {
         '<td class="n">' + (l.falta ? "—" : cop(l.precio)) + '</td>' +
         '<td class="n">' + (l.falta ? "—" : cop(l.total)) + '</td></tr>';
     };
+    var cantTotal = a.items.reduce(function (s, x) { return s + (Number(x.cant) || 0); }, 0);
+    var undTotal = a.items[0] ? a.items[0].und : "";
     ana += '<div class="apu"><div class="apuhd"><span class="apun">APU ' + a.apu + '</span>' +
       '<span class="apui">' + a.items.map(function (x) { return esc(x.item); }).join(", ") + '</span>' +
-      '<span class="apud">' + esc(a.items[0] ? a.items[0].desc : "") + '</span></div>' +
+      '<span class="apud">' + esc(a.items[0] ? a.items[0].desc : "") + '</span>' +
+      '<span class="apuq" style="font-size:11px;color:#5a6b7b;margin-left:12px">Cantidad total: ' +
+        fmt(cantTotal) + ' ' + esc(undTotal) + ' · ' + a.items.length + ' ítems</span></div>' +
       '<table class="cot"><thead><tr><th style="width:12%">Código</th>' +
       '<th>Descripción</th><th style="width:6%">Und</th><th style="width:10%">Cant.</th><th style="width:7%">Desp.</th>' +
       '<th style="width:13%">Vr. unit</th><th style="width:14%">Vr. total</th></tr></thead><tbody>' +
@@ -258,7 +262,7 @@ function exportarTodo(p) {
       var comp = componerAnalisis(cat, datos, p, aa.apu);
       var val = valorizar(cat, comp.lineas, margenesDe(p, aa.apu), p);
       analisisCache[aa.apu] = val;
-      raP += 2; // title row + column-header row
+      raP += 3; // title row + cantidad-total row + column-header row
       raP += 1 + val.lineas.filter(function (l) { return !l.mo; }).length + 1; // seccion + materiales + subtotal
       if (val.th > 0) raP += 1 + 2 + 1; // seccion + TR1/HER1 + subtotal
       raP += 1 + val.lineas.filter(function (l) { return l.mo; }).length + 1; // seccion + mano de obra + subtotal
@@ -497,6 +501,8 @@ function exportarTodo(p) {
   analisisDe(p).forEach(function (aa) {
     var val = analisisCache[aa.apu];
 
+    var cantTotalApu = aa.items.reduce(function (s, x) { return s + (Number(x.cant) || 0); }, 0);
+    var undTotalApu = aa.items[0] ? aa.items[0].und : "";
     var hd = a3.addRow(["APU " + aa.apu, aa.items.map(function (x) { return x.item; }).join(", "),
                         aa.items[0] ? aa.items[0].desc : ""]);
     a3.mergeCells("C" + ra + ":G" + ra);
@@ -504,6 +510,10 @@ function exportarTodo(p) {
     hd.getCell(2).font = { size: 9, color: { argb: "FF8A99A7" } };
     hd.getCell(1).border = { bottom: { style: "medium", color: { argb: LIME } } };
     hd.getCell(3).border = { bottom: { style: "medium", color: { argb: LIME } } };
+    ra++;
+    var infoRow = a3.addRow(["", "", "Cantidad total: " + fmt(cantTotalApu) + " " + (undTotalApu || "") + " · " + aa.items.length + " ítems"]);
+    a3.mergeCells("C" + ra + ":G" + ra);
+    infoRow.getCell(3).font = { size: 9, italic: true, color: { argb: "FF8A99A7" } };
     ra++;
     a3.addRow(["Código", "Descripción", "Und", "Cant.", "Desp.", "Vr. unit", "Vr. total"]).eachCell(thd);
     ra++;

@@ -89,6 +89,23 @@ function renderCatalogo() {
         '<span class="dlv m" style="font-weight:400;font-size:12px">' + h.aplicados + ' precios</span></div>';
     }).join("");
 
+    var ultimaAct = hist.length ? hist[0] : null;
+    var bannerAct = ultimaAct
+      ? '<div class="card" style="margin-bottom:12px;border-left:4px solid var(--lime,#7cc83d)">' +
+          '<div class="cbd" style="padding:10px 14px">' +
+            '<div style="font-size:13px;color:var(--ink2)">Última actualización de precios</div>' +
+            '<div style="font-size:15px;font-weight:600;color:var(--ink);margin-top:2px">' +
+              esc(ultimaAct.proveedor || ultimaAct.archivo || "Desconocido") +
+            '</div>' +
+            '<div style="font-size:12px;color:var(--ink3);margin-top:2px">' +
+              fecha(ultimaAct.fecha.slice(0, 10)) + ' · ' + (ultimaAct.aplicados || 0) + ' precios aplicados' +
+            '</div>' +
+          '</div></div>'
+      : '<div class="card" style="margin-bottom:12px;border-left:4px solid var(--ink3)">' +
+          '<div class="cbd" style="padding:10px 14px">' +
+            '<div style="font-size:13px;color:var(--ink3)">Sin actualizaciones de precios registradas</div>' +
+          '</div></div>';
+
     cuerpo =
       '<div class="card"><div class="cbd">' +
         '<div class="kpi" style="margin-bottom:13px">' +
@@ -106,6 +123,8 @@ function renderCatalogo() {
         '</div>' +
         '<input type="file" id="fcat" accept=".xlsx,.xlsm,.xls" class="hide">' +
       '</div></div>' +
+
+      bannerAct +
 
       (hist.length ? '<div class="card"><div class="chd"><span class="ct">Últimas actualizaciones</span></div>' +
         '<div class="cbd"><div class="dl">' + histFilas + '</div></div></div>' : "") +

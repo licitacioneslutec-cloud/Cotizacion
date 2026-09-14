@@ -344,3 +344,23 @@ tr[data-aj] td:first-child{box-shadow:inset 3px 0 0 var(--lime);}
 .prtotal{font-weight:600;color:var(--ink);}
 .pmat{color:var(--ink);}
 .pmo{color:var(--limedk);}
+
+/* Modal de confirmación de borrado */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.45);
+  display: flex; align-items: center; justify-content: center; z-index: 9999;
+}
+.modal-borrar {
+  background: var(--card, #fff); border-radius: 12px; padding: 28px 32px;
+  max-width: 420px; width: 90%; box-shadow: 0 8px 32px rgba(0,0,0,0.25);
+}
+.modal-icono { font-size: 48px; text-align: center; margin-bottom: 8px; }
+.modal-titulo { margin: 0 0 10px; text-align: center; color: var(--ink, #1a2533); }
+.modal-texto { font-size: 13px; color: var(--ink2, #5a6b7b); margin: 6px 0; }
+.modal-input { width: 100%; margin-top: 6px; }
+.modal-btn-borrar {
+  background: #c0392b !important; color: #fff !important; border-color: #c0392b !important;
+}
+.modal-btn-borrar:disabled {
+  opacity: 0.4; cursor: not-allowed;
+}
