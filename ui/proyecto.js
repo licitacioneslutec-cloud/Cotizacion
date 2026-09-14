@@ -984,6 +984,7 @@ function vArmado(p, r) {
       '<td' + tie + '><div class="apu' + (comparte ? " apudup" : "") + '">' +
         '<input class="in m inapu" data-apunum="' + k + '" value="' + (f.apu || "") +
           '" placeholder="—" title="Escribe un número para asignar o unir análisis">' +
+        (!f.apu ? '<button class="btnx" data-nuevoapu="' + k + '" title="Asignar análisis nuevo" style="font-size:13px;padding:0 4px;margin-left:2px;color:var(--pri)">+</button>' : '') +
         (f.apu ? '<button class="btnx" data-irapu="' + f.apu + '" title="Ir al análisis ' + f.apu + '" style="font-size:10px;padding:0 4px;margin-left:2px">→</button>' : '') +
         '</div></td>' +
       celPct + celPrecio +
@@ -1085,7 +1086,7 @@ function enlazarArmado(p) {
     tr.onclick = function (e) {
       if (e.target.closest(".inapu") || e.target.matches("[data-sel]") ||
           e.target.closest("[data-cantobs]") || e.target.closest("[data-edititem]") || e.target.closest("[data-editdesc]") ||
-          e.target.closest("[data-editcant]")) return;
+          e.target.closest("[data-editcant]") || e.target.closest("[data-nuevoapu]")) return;
       var k = tr.dataset.fila, i = vista.sel.indexOf(k);
       if (i >= 0) vista.sel.splice(i, 1); else vista.sel.push(k);
       render();
@@ -1126,6 +1127,17 @@ function enlazarArmado(p) {
     b.onclick = function (e) {
       e.stopPropagation();
       ir({ paso: "apartados", apu: Number(b.dataset.irapu) });
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-nuevoapu]"), function (b) {
+    b.onclick = function (e) {
+      e.stopPropagation();
+      var q = b.dataset.nuevoapu.split(":");
+      var f = p.hojas[Number(q[0])].filas[Number(q[1])];
+      if (!f) return;
+      f.apu = siguienteApu(p);
+      if (!f.cod || !f.cod.length) f.cod = ["CA"];
+      Store.guardar(p); render();
     };
   });
   Array.prototype.forEach.call(document.querySelectorAll("[data-edititem]"), function (el) {
