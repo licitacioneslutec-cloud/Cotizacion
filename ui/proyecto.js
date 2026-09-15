@@ -178,8 +178,43 @@ function renderProyectos() {
 
       /* Respaldo de un solo proyecto */
       if (datos && datos.id && datos.nombre) {
-        datos.id = id();
-        Store.guardar(datos); render();
+        var existente = Store.todos().filter(function (p) {
+          return p.nombre.trim().toLowerCase() === (datos.nombre || "").trim().toLowerCase();
+        })[0];
+        if (existente) {
+          var overlay = document.createElement("div");
+          overlay.className = "modal-overlay";
+          overlay.innerHTML =
+            '<div class="modal-borrar">' +
+              '<div class="modal-icono">⚠️</div>' +
+              '<h3 class="modal-titulo">Proyecto ya existe</h3>' +
+              '<p class="modal-texto">Ya tienes un proyecto llamado <strong>' + esc(existente.nombre) +
+                '</strong>. ¿Qué deseas hacer?</p>' +
+              '<div class="btnrow" style="margin-top:14px;justify-content:flex-end;gap:8px">' +
+                '<button class="btn" id="restCancelar">Cancelar</button>' +
+                '<button class="btn" id="restCopia">Crear copia</button>' +
+                '<button class="btn modal-btn-borrar" id="restReemplazar">Reemplazar</button>' +
+              '</div>' +
+            '</div>';
+          document.body.appendChild(overlay);
+          document.getElementById("restCancelar").onclick = function () {
+            document.body.removeChild(overlay);
+          };
+          document.getElementById("restReemplazar").onclick = function () {
+            document.body.removeChild(overlay);
+            datos.id = existente.id;
+            Store.guardar(datos); render();
+          };
+          document.getElementById("restCopia").onclick = function () {
+            document.body.removeChild(overlay);
+            datos.id = id();
+            datos.nombre = datos.nombre + " (copia)";
+            Store.guardar(datos); render();
+          };
+        } else {
+          datos.id = id();
+          Store.guardar(datos); render();
+        }
         return;
       }
       avisoError("Ese archivo no es un respaldo válido de esta aplicación.");
