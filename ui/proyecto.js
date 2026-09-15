@@ -2,6 +2,54 @@
 
 var _autoRespaldoTimer = null;
 
+/* Persistir DirectoryHandle en IndexedDB para no perderlo al recargar */
+var _dirHandleDB = (function () {
+  var dbName = "apu-dirhandle", storeName = "handles", key = "respaldo";
+  function abrirDB() {
+    return new Promise(function (resolve, reject) {
+      var req = indexedDB.open(dbName, 1);
+      req.onupgradeneeded = function (e) { e.target.result.createObjectStore(storeName); };
+      req.onsuccess = function () { resolve(req.result); };
+      req.onerror = function () { reject(req.error); };
+    });
+  }
+  return {
+    guardar: function (handle) {
+      return abrirDB().then(function (db) {
+        return new Promise(function (resolve, reject) {
+          var tx = db.transaction(storeName, "readwrite");
+          tx.objectStore(storeName).put(handle, key);
+          tx.oncomplete = function () { resolve(); };
+          tx.onerror = function () { reject(tx.error); };
+        });
+      });
+    },
+    leer: function () {
+      return abrirDB().then(function (db) {
+        return new Promise(function (resolve, reject) {
+          var tx = db.transaction(storeName, "readonly");
+          var req2 = tx.objectStore(storeName).get(key);
+          req2.onsuccess = function () { resolve(req2.result || null); };
+          req2.onerror = function () { reject(req2.error); };
+        });
+      });
+    }
+  };
+})();
+
+function recuperarCarpetaRespaldo() {
+  _dirHandleDB.leer().then(function (handle) {
+    if (!handle) return;
+    handle.requestPermission({ mode: "readwrite" }).then(function (perm) {
+      if (perm === "granted") {
+        window._dirRespaldo = handle;
+        window._dirRespaldoNombre = handle.name;
+        iniciarAutoRespaldo();
+      }
+    }).catch(function () {});
+  }).catch(function () {});
+}
+
 function guardarRespaldoEnCarpeta(p) {
   if (!window._dirRespaldo || !p) return Promise.resolve(false);
   var nombre = (p.nombre || "proyecto").replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "_");
@@ -674,6 +722,7 @@ function enlazarFicha(p) {
     window.showDirectoryPicker({ mode: "readwrite" }).then(function (dirHandle) {
       window._dirRespaldo = dirHandle;
       window._dirRespaldoNombre = dirHandle.name;
+      _dirHandleDB.guardar(dirHandle);
       var label = document.getElementById("carpetaElegida");
       if (label) label.textContent = "📁 " + dirHandle.name;
       avisoOk("Carpeta elegida: " + dirHandle.name);

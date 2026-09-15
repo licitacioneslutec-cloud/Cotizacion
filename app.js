@@ -238,6 +238,7 @@ IDB.abrir().then(function () {
   _cacheHist = r[2] || [];
   _cachePlan = r[3] || [];
   render();
+  if (typeof recuperarCarpetaRespaldo === "function") recuperarCarpetaRespaldo();
   if (Sync.encendida()) {
     Sync.iniciarTimer();
     Sync.bajarTodo().then(function (res) {
