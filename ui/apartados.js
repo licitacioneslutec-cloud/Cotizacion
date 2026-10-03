@@ -68,10 +68,20 @@ function vApartados(p) {
 
   var listaFiltrada = filtrarApus(lista);
 
+  var filtrosCat = '<div style="padding:4px 10px 0;display:flex;gap:4px;flex-wrap:wrap">' +
+    APARTADOS.map(function (ap) {
+      var on = vista.filtroApuCat === ap.id;
+      return '<button class="tog" data-filtrocat="' + ap.id + '" aria-pressed="' + on +
+        '" title="' + ap.nombre + '">' + ap.id + '</button>';
+    }).join("") +
+    (vista.filtroApuCat ? '<button class="btnx" data-filtrocat="" style="font-size:11px;color:var(--ink3);margin-left:4px" title="Quitar filtro">Todos</button>' : '') +
+    '</div>';
+
   return barraPct + '<div class="g g32">' +
       '<div class="card" style="margin:0"><div class="chd"><span class="ct">Análisis</span>' +
       '<span class="cn">' + listaFiltrada.length + ' de ' + lista.length + '</span></div>' +
-      '<div style="padding:0 10px 8px"><input class="in" id="filtroapu" placeholder="Buscar por número o descripción" value="' +
+      filtrosCat +
+      '<div style="padding:4px 10px 8px"><input class="in" id="filtroapu" placeholder="Buscar por número o descripción" value="' +
         esc(vista.filtroApu || '') + '"></div>' +
       '<div class="alist" id="listaapu">' + listaApu(p, listaFiltrada, act) + '</div></div>' +
       '<div id="panelapu">' + panelApu(p, cat, act) + '</div>' +
@@ -82,8 +92,11 @@ function vApartados(p) {
    según lo que haya escrito el usuario en #filtroapu */
 function filtrarApus(lista) {
   var filtro = (vista.filtroApu || "").toLowerCase();
-  if (!filtro) return lista;
+  var cat = vista.filtroApuCat || "";
+  if (!filtro && !cat) return lista;
   return lista.filter(function (a) {
+    if (cat && a.cod.indexOf(cat) < 0) return false;
+    if (!filtro) return true;
     if (String(a.apu).indexOf(filtro) >= 0) return true;
     return a.items.some(function (it) {
       return (it.desc || "").toLowerCase().indexOf(filtro) >= 0;
@@ -644,6 +657,15 @@ function enlazarLista(p) {
         }
       });
       Store.guardar(p); refrescarPanel(p);
+    };
+  });
+
+  Array.prototype.forEach.call(document.querySelectorAll("[data-filtrocat]"), function (b) {
+    b.onclick = function (e) {
+      e.stopPropagation();
+      var v = b.dataset.filtrocat;
+      vista.filtroApuCat = (v && vista.filtroApuCat !== v) ? v : null;
+      var y = window.scrollY; render(); window.scrollTo(0, y);
     };
   });
 

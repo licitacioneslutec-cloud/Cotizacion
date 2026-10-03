@@ -1062,7 +1062,7 @@ function vArmado(p, r) {
                    '<button class="btnx" data-borrarfila="' + k + '" title="Eliminar ítem" style="color:#c00;margin-left:2px">×</button>'
                    : esc(f.item)) + '</td>' +
       '<td>' + (f.manual ? '<input class="in" style="width:100%" data-editdesc="' + k + '" value="' + esc(f.desc) + '">' : esc(f.desc)) + '</td>' +
-      '<td style="color:var(--ink2)">' + esc(f.und) + '</td>' +
+      '<td style="color:var(--ink2)">' + (f.manual ? '<input class="in m" style="font-size:12px;width:50px" data-editund="' + k + '" value="' + esc(f.und) + '">' : esc(f.und)) + '</td>' +
       '<td class="num">' + (f.manual ? '<input class="in m" type="number" min="0" step="0.01" style="width:60px;text-align:right" data-editcant="' + k + '" value="' + (f.cant || "") + '">' : fmt(f.cant)) + '</td>' +
       '<td><input class="in m" style="font-size:11px" data-cantobs="' + k + '" value="' + esc(f.cantObs || "") + '" placeholder="—"></td>' +
       '<td' + tie + '><div class="apu' + (comparte ? " apudup" : "") + '">' +
@@ -1236,6 +1236,7 @@ function enlazarArmado(p) {
       var pos = partes[0].split(":");
       var f = p.hojas[Number(pos[0])].filas[Number(pos[1])];
       if (!f) return;
+      if (!f.apu) f.apu = siguienteApu(p);
       var id = partes[1], idx = f.cod.indexOf(id);
       if (idx >= 0) f.cod.splice(idx, 1); else f.cod.push(id);
       Store.guardar(p); var y = window.scrollY; render(); window.scrollTo(0, y);
@@ -1260,6 +1261,13 @@ function enlazarArmado(p) {
       var q = el.dataset.editcant.split(":");
       var f = p.hojas[Number(q[0])].filas[Number(q[1])];
       if (f) { f.cant = Number(el.value) || 0; Store.guardar(p); render(); }
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-editund]"), function (el) {
+    el.onchange = function () {
+      var q = el.dataset.editund.split(":");
+      var f = p.hojas[Number(q[0])].filas[Number(q[1])];
+      if (f) { f.und = el.value; Store.guardar(p); }
     };
   });
   var copiarBtn = document.getElementById("copiarCantObs");

@@ -10,7 +10,8 @@
    ------------------------------------------------------------------ */
 
 var vista = { pantalla: "proyectos", pid: null, paso: "ficha", hoja: 0, sel: [], borrador: null,
-              precios: null, busca: "", soloSin: false, apu: null, filtroArmadoApu: "" };
+              precios: null, busca: "", soloSin: false, apu: null, filtroArmadoApu: "",
+              filtroApuCat: null, buscaHist: "" };
 var app = document.getElementById("app");
 
 function ir(cambios) {
@@ -25,6 +26,7 @@ function ir(cambios) {
 
 function render() {
   if (vista.pantalla === "catalogo") return renderCatalogo();
+  if (vista.pantalla === "historial") return renderHistorial();
   if (vista.pantalla === "precios") return renderPrecios();
   if (vista.pantalla === "ofertas") return renderOfertas();
   if (vista.pantalla === "sync") return renderSync();

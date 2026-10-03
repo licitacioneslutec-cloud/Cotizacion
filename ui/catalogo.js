@@ -119,6 +119,7 @@ function renderCatalogo() {
           '<button class="btn" id="cargarofertas">Cargar proveedores</button>' +
           '<button class="btn" id="expcat">Descargar catálogo</button>' +
           '<button class="btn" id="expof">Descargar proveedores</button>' +
+          '<button class="btn" id="verhistorial">Histórico de precios</button>' +
           '<button class="btn" id="recargar">Reemplazar catálogo</button>' +
         '</div>' +
         '<input type="file" id="fcat" accept=".xlsx,.xlsm,.xls" class="hide">' +
@@ -171,6 +172,8 @@ function renderCatalogo() {
   var input = document.getElementById("fcat");
   var drop = document.getElementById("dropcat");
   if (drop) { drop.onclick = function () { input.click(); }; }
+  var vh = document.getElementById("verhistorial");
+  if (vh) vh.onclick = function () { ir({ pantalla: "historial", buscaHist: "" }); };
   var rec = document.getElementById("recargar");
   if (rec) rec.onclick = function () {
     if (confirm("Se reemplaza el catálogo. Los precios que hayas actualizado se pierden. ¿Seguir?")) input.click();
@@ -689,7 +692,13 @@ function renderPrecios() {
       est.dif[g].forEach(function (r) {
         var it = cat.items[idx[r.cod]];
         if (!it) return;
-        it.precioAnt = Number(it.precio) || 0;
+        var ant = Number(it.precio) || 0;
+        if (ant > 0) {
+          if (!it.hist) it.hist = [];
+          it.hist.unshift({ f: ahora, p: ant, prov: it.prov || "" });
+          if (it.hist.length > 20) it.hist = it.hist.slice(0, 20);
+        }
+        it.precioAnt = ant;
         it.precio = r.nuevo;
         it.prov = est.proveedor || it.prov;
         if (r.codProv) it.codProv = r.codProv;
@@ -708,5 +717,79 @@ function renderPrecios() {
   if (otra) otra.onclick = function () { ir({ precios: null }); };
   var alc = document.getElementById("alcat");
   if (alc) alc.onclick = function () { ir({ pantalla: "catalogo", precios: null }); };
+}
+
+/* ---- Histórico de precios (solo lectura) ---- */
+
+function renderHistorial() {
+  var cat = Catalogo.leer();
+  if (!cat) { ir({ pantalla: "catalogo" }); return; }
+
+  var q = (vista.buscaHist || "").toLowerCase();
+  var conHist = cat.items.filter(function (i) {
+    if (!i.hist || !i.hist.length) return false;
+    if (!q) return true;
+    return i.cod.toLowerCase().indexOf(q) >= 0 || (i.desc || "").toLowerCase().indexOf(q) >= 0;
+  });
+
+  var tope = vista.topeHist || 100;
+  var muestra = conHist.slice(0, tope);
+
+  var filas = muestra.map(function (i) {
+    var cambios = i.hist.map(function (h) {
+      return '<div style="display:flex;gap:10px;font-size:12px;color:var(--ink2);padding:2px 0">' +
+        '<span style="min-width:80px">' + fecha(h.f.slice(0, 10)) + '</span>' +
+        '<span style="min-width:100px;text-align:right">' + cop(h.p) + '</span>' +
+        '<span style="color:var(--ink3)">' + esc(h.prov || "—") + '</span>' +
+      '</div>';
+    }).join("");
+
+    return '<tr><td class="m" style="font-size:12px">' + esc(i.cod) + '</td>' +
+      '<td>' + esc(i.desc) + '</td>' +
+      '<td class="num">' + cop(Number(i.precio) || 0) + '</td>' +
+      '<td><div style="max-height:120px;overflow-y:auto">' + cambios + '</div></td></tr>';
+  }).join("");
+
+  app.innerHTML = barraTop("catalogo") +
+    '<header class="top"><div class="wrap topin"><div>' +
+      '<div class="brand">Datos maestros</div>' +
+      '<h1 class="d h1">Histórico de precios</h1>' +
+      '<div class="sub">Cambios de precio registrados por insumo (solo lectura)</div>' +
+    '</div></div></header>' +
+    '<main class="wrap main">' +
+      '<div class="card"><div class="cbd" style="padding-bottom:12px">' +
+        '<div class="btnrow" style="margin-bottom:12px"><button class="btn" id="volvercat">← Volver al catálogo</button></div>' +
+        '<input class="in" id="buscahist" placeholder="Buscar por código o descripción" value="' + esc(vista.buscaHist || "") + '">' +
+        '<div style="font-size:12px;color:var(--ink3);margin-top:6px">' + conHist.length + ' insumos con historial</div>' +
+      '</div>' +
+      (filas
+        ? '<div class="scroll"><table class="tbl"><thead><tr>' +
+            '<th style="width:92px">Código</th><th>Descripción</th>' +
+            '<th style="width:106px" class="num">Precio actual</th>' +
+            '<th>Historial de cambios</th>' +
+          '</tr></thead><tbody>' + filas + '</tbody></table></div>'
+        : '<div class="cbd"><div class="empty">No hay insumos con historial de cambios' +
+            (q ? ' que coincidan con la búsqueda' : '') + '.</div></div>') +
+      (conHist.length > muestra.length
+        ? '<div class="cbd" style="border-top:1px solid var(--line2);text-align:center">' +
+          '<button class="btn" id="mashist">Ver ' + Math.min(100, conHist.length - muestra.length) +
+          ' más</button></div>'
+        : "") +
+    '</div></main>';
+
+  enlazarTop();
+  var vc = document.getElementById("volvercat");
+  if (vc) vc.onclick = function () { ir({ pantalla: "catalogo" }); };
+  var bh = document.getElementById("buscahist");
+  if (bh) bh.oninput = function () {
+    vista.buscaHist = this.value;
+    vista.topeHist = 100;
+    var pos = this.selectionStart;
+    render();
+    var n = document.getElementById("buscahist");
+    if (n) { n.focus(); n.setSelectionRange(pos, pos); }
+  };
+  var mh = document.getElementById("mashist");
+  if (mh) mh.onclick = function () { vista.topeHist = (vista.topeHist || 100) + 100; render(); };
 }
 
