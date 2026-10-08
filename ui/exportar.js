@@ -253,7 +253,7 @@ function exportarTodo(p) {
   // time to know those row numbers, caching val so Análisis doesn't recompute.
   // ponytail: row math here must stay in sync with the real writer loop below;
   // upgrade to a shared row-layout function if they ever drift.
-  var apuDirectoRow = {};
+  var apuDirectoRow = {}, apuMatSubtRow = {}, apuThSubtRow = {}, apuMoSubtRow = {};
   var analisisCache = {};
   (function () {
     var raP = 1;
@@ -264,8 +264,10 @@ function exportarTodo(p) {
       analisisCache[aa.apu] = val;
       raP += 3; // title row + cantidad-total row + column-header row
       raP += 1 + val.lineas.filter(function (l) { return !l.mo; }).length + 1; // seccion + materiales + subtotal
-      if (val.th > 0) raP += 1 + 2 + 1; // seccion + TR1/HER1 + subtotal
+      apuMatSubtRow[aa.apu] = raP - 1;
+      if (val.th > 0) { raP += 1 + 2 + 1; apuThSubtRow[aa.apu] = raP - 1; } // seccion + TR1/HER1 + subtotal
       raP += 1 + val.lineas.filter(function (l) { return l.mo; }).length + 1; // seccion + mano de obra + subtotal
+      apuMoSubtRow[aa.apu] = raP - 1;
       raP += 1; // COSTO DIRECTO row
       apuDirectoRow[aa.apu] = raP - 1;
       raP += 1; // blank separator row
@@ -445,7 +447,18 @@ function exportarTodo(p) {
       var tieneApu = apu && apuDirectoRow[apu];
       var r;
       if (sep) {
-        var matCell = matU, moCell = moU || null;
+        var matCell, moCell;
+        if (tieneApu && apuMatSubtRow[apu]) {
+          // Material unit = (matSubt + thSubt) * AIU factor; MO unit = moSubt (direct)
+          var matRef = "'Análisis'!G" + apuMatSubtRow[apu];
+          if (apuThSubtRow[apu]) matRef = "(" + matRef + "+'Análisis'!G" + apuThSubtRow[apu] + ")";
+          var factor = pV > 0 ? (1 + aiuTotal) / (1 + pV) : (1 + aiuTotal);
+          matCell = { formula: matRef + "*" + factor, result: matU || 0 };
+          moCell = { formula: "'Análisis'!G" + apuMoSubtRow[apu], result: moU || 0 };
+        } else {
+          matCell = matU;
+          moCell = moU || null;
+        }
         var matTCell = tieneApu ? { formula: "F" + rc + "*E" + rc, result: matT || 0 } : matT;
         var moTCell = tieneApu ? { formula: "H" + rc + "*E" + rc, result: moT || 0 } : moT;
         r = c2.addRow([apu || "", f.item, f.desc, f.und, q, matCell, matTCell,
@@ -476,22 +489,33 @@ function exportarTodo(p) {
     r.getCell(col + 1).numFmt = moneda; r.getCell(col + 1).font = { bold: true, color: { argb: NAVY } };
     rc++;
   };
+  var totCotFormula = function (k, formula, result, col) {
+    var arr = new Array(sep ? 10 : 8).fill(null);
+    arr[1] = k; arr[col] = { formula: formula, result: result || 0 };
+    var r = c2.addRow(arr);
+    r.getCell(2).font = { bold: true, color: { argb: NAVY } };
+    r.getCell(col + 1).numFmt = moneda; r.getCell(col + 1).font = { bold: true, color: { argb: NAVY } };
+    rc++;
+  };
   if (sep) {
-    /* col 6 = Sumin. total, col 8 = M.O. total (índices base 0) */
-    totCot("Subtotal materiales", materialVisibleTotal, 6);
-    totCot("IVA materiales " + (mg.iva || 0) + "%", materialVisibleIva, 6);
-    totCot("Total materiales", materialVisibleTotalConIva, 6);
-    totCot("Subtotal mano de obra", manoObraVisibleTotal, 8);
-    totCot("Administración mano de obra " + (mg.admin || 0) + "%", t.moAdmin, 8);
-    totCot("Imprevistos mano de obra " + (mg.imprev || 0) + "%", t.moImprev, 8);
-    totCot("Utilidad mano de obra " + (mg.util || 0) + "%", t.moUtil, 8);
-    totCot("IVA sobre utilidad mano de obra " + (mg.iva || 0) + "%", t.moIva, 8);
-    totCot("Total mano de obra", t.totalMo, 8);
+    /* col 6 = Sumin. total (G), col 8 = M.O. total (I) (índices base 0) */
+    var sMat = rc;
+    totCotFormula("Subtotal materiales", "SUM(G2:G" + cotDataEnd + ")", materialVisibleTotal, 6);
+    totCotFormula("IVA materiales " + (mg.iva || 0) + "%", "G" + sMat + "*" + pV, materialVisibleIva, 6);
+    totCotFormula("Total materiales", "G" + sMat + "+G" + (sMat + 1), materialVisibleTotalConIva, 6);
+    var sMo = rc;
+    totCotFormula("Subtotal mano de obra", "SUM(I2:I" + cotDataEnd + ")", manoObraVisibleTotal, 8);
+    totCotFormula("Administración mano de obra " + (mg.admin || 0) + "%", "I" + sMo + "*" + pA, t.moAdmin, 8);
+    totCotFormula("Imprevistos mano de obra " + (mg.imprev || 0) + "%", "I" + sMo + "*" + pI, t.moImprev, 8);
+    totCotFormula("Utilidad mano de obra " + (mg.util || 0) + "%", "I" + sMo + "*" + pU, t.moUtil, 8);
+    totCotFormula("IVA sobre utilidad mano de obra " + (mg.iva || 0) + "%", "I" + (sMo + 3) + "*" + pV, t.moIva, 8);
+    totCotFormula("Total mano de obra", "SUM(I" + sMo + ":I" + (sMo + 4) + ")", t.totalMo, 8);
   } else {
-    totCot("Subtotal", t.subtotal, 6);
-    totCot("AIU", t.admin + t.imprev + t.util, 6);
-    totCot("IVA sobre utilidad", t.iva, 6);
-    totCot("VALOR TOTAL", t.total, 6);
+    var sub = rc;
+    totCotFormula("Subtotal", "SUM(G2:G" + cotDataEnd + ")", t.subtotal, 6);
+    totCotFormula("AIU", "G" + sub + "*(" + pA + "+" + pI + "+" + pU + ")", t.admin + t.imprev + t.util, 6);
+    totCotFormula("IVA sobre utilidad", "G" + sub + "*" + pU + "*" + pV, t.iva, 6);
+    totCotFormula("VALOR TOTAL", "SUM(G" + sub + ":G" + (sub + 2) + ")", t.total, 6);
   }
 
   /* ===== 3. ANÁLISIS ===== */
@@ -561,19 +585,24 @@ function exportarTodo(p) {
     val.lineas.filter(function (l) { return !l.mo; }).forEach(linea);
     subt("Subtotal materiales", val.mat);
     matSubtRow = ra - 1;
+    apuMatSubtRow[aa.apu] = matSubtRow;
     if (val.th > 0) {
       seccion("II · Transporte y herramienta");
-      var tr = a3.addRow(["TR1", "Transportes", "", null, val.pctTrans / 100, null, val.transporte]);
+      var tr = a3.addRow(["TR1", "Transportes", "", null, val.pctTrans / 100, null,
+        { formula: "G" + matSubtRow + "*" + (val.pctTrans / 100), result: val.transporte }]);
       tr.getCell(5).numFmt = "0.##%"; tr.getCell(7).numFmt = moneda; tr.eachCell(function (c) { c.font = { size: 9 }; }); ra++;
-      var he = a3.addRow(["HER1", "Herramienta de mano", "", null, val.pctHerr / 100, null, val.herramienta]);
+      var he = a3.addRow(["HER1", "Herramienta de mano", "", null, val.pctHerr / 100, null,
+        { formula: "G" + matSubtRow + "*" + (val.pctHerr / 100), result: val.herramienta }]);
       he.getCell(5).numFmt = "0.##%"; he.getCell(7).numFmt = moneda; he.eachCell(function (c) { c.font = { size: 9 }; }); ra++;
       subt("Subtotal transporte y herramienta", val.th);
       thSubtRow = ra - 1;
+      apuThSubtRow[aa.apu] = thSubtRow;
     }
     seccion("III · Mano de obra");
     val.lineas.filter(function (l) { return l.mo; }).forEach(linea);
     subt("Subtotal mano de obra", val.mo);
     moSubtRow = ra - 1;
+    apuMoSubtRow[aa.apu] = moSubtRow;
 
     var directoFormula = "G" + matSubtRow + (thSubtRow ? "+G" + thSubtRow : "") + "+G" + moSubtRow;
     var dr = a3.addRow(["", "", "COSTO DIRECTO", "", "", "", { formula: directoFormula, result: val.directo || 0 }]);
@@ -593,8 +622,9 @@ function exportarTodo(p) {
   insumosDe(p, cat).forEach(function (i) {
     var venta = precioAjustado({ precio: i.precio, imp: i.imp, ofertas: i.ofertas, sel: i.sel, cod: i.cod }, mg, p);
     var costo = costoDe({ precio: i.precio, ofertas: i.ofertas, sel: i.sel, cod: i.cod }, p);
+    var valeCell = costo > 0 ? { formula: "G" + ri + "*D" + ri, result: venta * i.cantidad } : null;
     var r = i4.addRow([i.cod, i.desc, i.und, i.cantidad, i.desp ? i.desp / 100 : null,
-                       costo || null, venta || null, costo > 0 ? venta * i.cantidad : null, i.apus.join(", ")]);
+                       costo || null, venta || null, valeCell, i.apus.join(", ")]);
     r.eachCell(function (cel, cn) {
       cel.font = { size: 9 }; cel.border = borde;
       if (cn === 4) cel.numFmt = "#,##0.##";

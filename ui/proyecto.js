@@ -833,7 +833,25 @@ function vAnexo(p) {
       '<div class="btnrow" style="margin-top:16px"><button class="btn btnp" id="releer">Volver a leer con este mapeo</button></div>';
   }
 
-  return '<div class="card"><div class="chd"><span class="ct">Anexo del cliente</span>' +
+  var rlec = vista.relectura, resumenRelectura = "";
+  if (rlec) {
+    resumenRelectura = '<div class="card" style="border-left:4px solid var(--pri)">' +
+      '<div class="chd"><span class="ct">Comparación: ' + esc(rlec.archivo) + '</span></div>' +
+      '<div class="cbd">' +
+      '<div class="kpi" style="margin-bottom:13px">' +
+        '<div class="kc"><div class="kk">Ítems nuevos</div><div class="kv">' + rlec.totalNuevos + '</div></div>' +
+        '<div class="kc"><div class="kk">Con APU conservado</div><div class="kv" style="color:var(--ok)">' + rlec.rescatados + '</div></div>' +
+        '<div class="kc"><div class="kk">Sin match</div><div class="kv" style="color:var(--warn)">' + rlec.sinMatch + '</div></div>' +
+        '<div class="kc"><div class="kk">Eliminados</div><div class="kv" style="color:var(--err)">' + rlec.eliminados + '</div></div>' +
+      '</div>' +
+      '<p style="font-size:13px;color:var(--ink2);margin:0 0 12px">Los análisis compuestos (datosApu) se mantienen. Los ítems sin match empiezan sin APU asignado.</p>' +
+      '<div class="btnrow">' +
+        '<button class="btn btnp" id="aplicarRelectura">Aplicar reemplazo</button>' +
+        '<button class="btn" id="cancelarRelectura">Cancelar</button>' +
+      '</div></div></div>';
+  }
+
+  return resumenRelectura + '<div class="card"><div class="chd"><span class="ct">Anexo del cliente</span>' +
       '<span class="cn m">' + esc(p.archivo) + '</span></div>' +
       '<div class="cbd" style="padding-bottom:12px">' +
         '<div class="tabs">' + pestanas + '</div>' +
@@ -853,6 +871,21 @@ function enlazarAnexo(p) {
     b.onclick = function () { ir({ hoja: Number(b.dataset.hoja), avisoRelectura: null }); };
   });
 
+  var aplR = document.getElementById("aplicarRelectura");
+  if (aplR) aplR.onclick = function () {
+    var rlec = vista.relectura;
+    p.hojas = rlec.hojasNuevas;
+    p.archivo = rlec.archivo;
+    vista.relectura = null;
+    Store.guardar(p);
+    ir({ hoja: 0, avisoRelectura: "Anexo reemplazado. Se conservó el armado de " + rlec.rescatados + " ítems." });
+  };
+  var canR = document.getElementById("cancelarRelectura");
+  if (canR) canR.onclick = function () {
+    vista.relectura = null;
+    render();
+  };
+
   var resubir = document.getElementById("resubir");
   var finput = document.getElementById("fresubir");
   if (resubir && finput) {
@@ -865,34 +898,47 @@ function enlazarAnexo(p) {
           var hojasNuevas = leerLibro(new Uint8Array(fr.result));
 
           /* Guardar el armado actual por item+descripción para reponerlo */
-          var previo = {};
+          var previo = {}, previoPorDesc = {};
           (p.hojas || []).forEach(function (h) {
             (h.filas || []).forEach(function (f) {
               if (f.tipo === "it" && (f.apu || (f.cod && f.cod.length))) {
-                previo[(f.item || "") + "|" + (f.desc || "")] = { cod: f.cod || [], apu: f.apu || null };
+                var e = { cod: f.cod || [], apu: f.apu || null, cantObs: f.cantObs || "" };
+                previo[(f.item || "") + "|" + (f.desc || "")] = e;
+                var key = norm(f.desc || "");
+                if (key && !previoPorDesc[key]) previoPorDesc[key] = e; /* el primero gana, evita ambigüedad */
               }
             });
           });
 
-          /* Reponer el armado en el archivo nuevo donde coincida */
-          var rescatados = 0;
+          /* Reponer el armado en el archivo nuevo: exacto por item+desc, o solo por descripción */
+          var rescatados = 0, totalNuevos = 0, nuevosSet = {};
           hojasNuevas.forEach(function (h) {
             (h.filas || []).forEach(function (f) {
               if (f.tipo !== "it") return;
-              var v = previo[(f.item || "") + "|" + (f.desc || "")];
-              if (v) { f.cod = v.cod.slice(); f.apu = v.apu; rescatados++; }
+              totalNuevos++;
+              nuevosSet[(f.item || "") + "|" + (f.desc || "")] = true;
+              var v = previo[(f.item || "") + "|" + (f.desc || "")] || previoPorDesc[norm(f.desc || "")];
+              if (v) { f.cod = v.cod.slice(); f.apu = v.apu; if (v.cantObs) f.cantObs = v.cantObs; rescatados++; }
             });
           });
 
-          if (!confirm("El archivo nuevo tiene " +
-              hojasNuevas.reduce(function (s, h) { return s + (h.filas ? h.filas.filter(function (x) { return x.tipo === "it"; }).length : 0); }, 0) +
-              " ítems. Se conserva el armado de " + rescatados + " que coinciden por ítem y descripción.\\n\\n" +
-              "Los análisis ya compuestos (datosApu) se mantienen. ¿Reemplazar el anexo?")) return;
+          /* Ítems armados del anexo viejo que ya no aparecen */
+          var eliminados = 0;
+          (p.hojas || []).forEach(function (h) {
+            (h.filas || []).forEach(function (f) {
+              if (f.tipo === "it" && f.apu && !nuevosSet[(f.item || "") + "|" + (f.desc || "")]) eliminados++;
+            });
+          });
 
-          p.hojas = hojasNuevas;
-          p.archivo = file.name;
-          Store.guardar(p);
-          ir({ hoja: 0, avisoRelectura: "Anexo reemplazado. Se conservó el armado de " + rescatados + " ítems." });
+          vista.relectura = {
+            archivo: file.name,
+            hojasNuevas: hojasNuevas,
+            totalNuevos: totalNuevos,
+            rescatados: rescatados,
+            sinMatch: totalNuevos - rescatados,
+            eliminados: eliminados
+          };
+          render();
         } catch (err) {
           avisoError("No se pudo leer el archivo: " + (err && err.message ? err.message : err));
         }
@@ -1175,7 +1221,7 @@ function enlazarArmado(p) {
     tr.onclick = function (e) {
       if (e.target.closest(".inapu") || e.target.matches("[data-sel]") || e.target.closest(".tog") ||
           e.target.closest("[data-cantobs]") || e.target.closest("[data-edititem]") || e.target.closest("[data-editdesc]") ||
-          e.target.closest("[data-editcant]") || e.target.closest("[data-nuevoapu]")) return;
+          e.target.closest("[data-editcant]") || e.target.closest("[data-nuevoapu]") || e.target.closest("[data-editund]")) return;
       var k = tr.dataset.fila, i = vista.sel.indexOf(k);
       if (i >= 0) vista.sel.splice(i, 1); else vista.sel.push(k);
       render();

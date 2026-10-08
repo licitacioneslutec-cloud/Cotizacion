@@ -66,7 +66,7 @@ function vApartados(p) {
     '<div class="pctnota">Se calculan sobre el subtotal de materiales de cada análisis y valen para todo el proyecto.</div>' +
   '</div></div>';
 
-  var listaFiltrada = filtrarApus(lista);
+  var listaFiltrada = filtrarApus(lista, p);
 
   var filtrosCat = '<div style="padding:4px 10px 0;display:flex;gap:4px;flex-wrap:wrap">' +
     APARTADOS.map(function (ap) {
@@ -83,6 +83,8 @@ function vApartados(p) {
       filtrosCat +
       '<div style="padding:4px 10px 8px"><input class="in" id="filtroapu" placeholder="Buscar por número o descripción" value="' +
         esc(vista.filtroApu || '') + '"></div>' +
+      '<div style="padding:0 10px 8px"><input class="in" id="filtroinsumo" placeholder="Buscar por código de insumo" value="' +
+        esc(vista.filtroApuInsumo || '') + '"></div>' +
       '<div class="alist" id="listaapu">' + listaApu(p, listaFiltrada, act) + '</div></div>' +
       '<div id="panelapu">' + panelApu(p, cat, act) + '</div>' +
     '</div>';
@@ -90,12 +92,19 @@ function vApartados(p) {
 
 /* Filtra la lista de análisis por número de APU o texto de descripción del anexo,
    según lo que haya escrito el usuario en #filtroapu */
-function filtrarApus(lista) {
+function filtrarApus(lista, p) {
   var filtro = (vista.filtroApu || "").toLowerCase();
   var cat = vista.filtroApuCat || "";
-  if (!filtro && !cat) return lista;
+  var insumoFilter = (vista.filtroApuInsumo || "").trim().toLowerCase();
+  if (!filtro && !cat && !insumoFilter) return lista;
+  var catalogo = insumoFilter ? Catalogo.leer() : null;
   return lista.filter(function (a) {
     if (cat && a.cod.indexOf(cat) < 0) return false;
+    if (insumoFilter) {
+      var datos = (p.datosApu && p.datosApu[a.apu]) || {};
+      var comp = componerAnalisis(catalogo, datos, p, a.apu);
+      if (!comp.lineas.some(function (l) { return String(l.cod).toLowerCase().indexOf(insumoFilter) >= 0; })) return false;
+    }
     if (!filtro) return true;
     if (String(a.apu).indexOf(filtro) >= 0) return true;
     return a.items.some(function (it) {
@@ -622,7 +631,7 @@ function refrescarPanel(p, foco) {
   }
 
   var lst = document.getElementById("listaapu");
-  if (lst) { lst.innerHTML = listaApu(p, filtrarApus(analisisDe(p)), act); enlazarLista(p); }
+  if (lst) { lst.innerHTML = listaApu(p, filtrarApus(analisisDe(p), p), act); enlazarLista(p); }
 
   if (foco) {
     var el = document.querySelector('[data-tu="' + foco + '"]');
@@ -677,6 +686,17 @@ function enlazarLista(p) {
     render();
     window.scrollTo(0, y);
     var n = document.getElementById("filtroapu");
+    if (n) { n.focus(); n.setSelectionRange(pos, pos); }
+  };
+
+  var fi = document.getElementById("filtroinsumo");
+  if (fi) fi.oninput = function () {
+    vista.filtroApuInsumo = this.value;
+    var pos = this.selectionStart;
+    var y = window.scrollY;
+    render();
+    window.scrollTo(0, y);
+    var n = document.getElementById("filtroinsumo");
     if (n) { n.focus(); n.setSelectionRange(pos, pos); }
   };
 }
