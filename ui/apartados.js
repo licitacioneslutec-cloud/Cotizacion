@@ -633,7 +633,7 @@ function refrescarPanel(p, foco) {
   }
 
   var lst = document.getElementById("listaapu");
-  if (lst) { lst.innerHTML = listaApu(p, filtrarApus(analisisDe(p), p), act); enlazarLista(p); }
+  if (lst) { var st = lst.scrollTop; lst.innerHTML = listaApu(p, filtrarApus(analisisDe(p), p), act); enlazarLista(p); lst.scrollTop = st; }
 
   if (foco) {
     var el = document.querySelector('[data-tu="' + foco + '"]');

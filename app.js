@@ -15,8 +15,11 @@ var vista = { pantalla: "proyectos", pid: null, paso: "ficha", hoja: 0, sel: [],
 var app = document.getElementById("app");
 
 function ir(cambios) {
+  var mismaVista = !cambios.pantalla && !cambios.paso;
+  var y = mismaVista ? window.scrollY : 0;
   Object.keys(cambios).forEach(function (k) { vista[k] = cambios[k]; });
   render();
+  if (mismaVista) window.scrollTo(0, y);
 }
 
 
