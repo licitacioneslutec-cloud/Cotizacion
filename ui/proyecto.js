@@ -1034,7 +1034,8 @@ function vArmado(p, r) {
       '<div class="empty">Esta hoja no está incluida en el proyecto. Actívala en el paso 2.</div></div>';
   }
 
-  var filtro = (vista.filtroArmado || "").toLowerCase();
+  var filtro = (vista.filtroArmado || "").toLowerCase().trim();
+  var tokens = filtro ? filtro.split(/\s+/) : [];
   var filtroApu = (vista.filtroArmadoApu || "").trim();
 
   /* Cuántos ítems comparten cada análisis, en todo el proyecto */
@@ -1046,8 +1047,10 @@ function vArmado(p, r) {
   var cuerpo = "", capPend = null, visibles = 0;
   h.filas.forEach(function (f, fi) {
     if (f.tipo === "cap") { capPend = { f: f, fi: fi }; return; }
-    if (filtro && (f.desc || "").toLowerCase().indexOf(filtro) < 0 &&
-        (f.item || "").toLowerCase().indexOf(filtro) < 0) return;
+    if (tokens.length) {
+      var txt = ((f.desc || "") + " " + (f.item || "")).toLowerCase();
+      if (!tokens.every(function (t) { return txt.indexOf(t) >= 0; })) return;
+    }
     if (filtroApu && String(f.apu || "").indexOf(filtroApu) < 0) return;
     if (vista.soloSinApu && f.apu) return;
     if (capPend && !filtro) {

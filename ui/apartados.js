@@ -106,9 +106,11 @@ function filtrarApus(lista, p) {
       if (!comp.lineas.some(function (l) { return String(l.cod).toLowerCase().indexOf(insumoFilter) >= 0; })) return false;
     }
     if (!filtro) return true;
+    var tokens = filtro.split(/\s+/);
     if (String(a.apu).indexOf(filtro) >= 0) return true;
     return a.items.some(function (it) {
-      return (it.desc || "").toLowerCase().indexOf(filtro) >= 0;
+      var txt = (it.desc || "").toLowerCase();
+      return tokens.every(function (t) { return txt.indexOf(t) >= 0; });
     });
   });
 }
