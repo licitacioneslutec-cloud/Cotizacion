@@ -28,6 +28,52 @@ function guardarCajasCustom(lista) {
   localStorage.setItem(CLAVE_CAJAS, JSON.stringify(lista));
 }
 
+function parseDimsCaja(s) {
+  if (!s) return null;
+  var nums = s.match(/[\d.]+/g);
+  return nums ? nums.map(Number) : null;
+}
+
+function seccionVisualCajas(cajas) {
+  if (!cajas.length) return '';
+  var datos = cajas.map(function (c) {
+    var t = parseDimsCaja(c.tapa);
+    var p = parseDimsCaja(c.prof);
+    return { ref: c.ref, tw: t && t[0] ? t[0] : 0, th: t && t[1] ? t[1] : 0, prof: p ? p[0] : 0 };
+  }).filter(function (d) { return d.tw > 0 && d.th > 0; });
+  if (!datos.length) return '';
+
+  var maxDim = 0;
+  datos.forEach(function (d) { maxDim = Math.max(maxDim, d.tw, d.th, d.prof); });
+  var escala = 140 / (maxDim || 1);
+
+  var items = datos.map(function (d) {
+    var w = Math.max(Math.round(d.tw * escala), 18);
+    var h = Math.max(Math.round(d.th * escala), 18);
+    var dp = d.prof ? Math.max(Math.round(d.prof * escala), 10) : 0;
+    return '<div style="text-align:center;flex-shrink:0">' +
+      '<div style="font-size:11px;font-weight:600;margin-bottom:4px;color:var(--ink)">' + esc(d.ref) + '</div>' +
+      '<div style="display:inline-flex;align-items:center;justify-content:center;' +
+        'width:' + w + 'px;height:' + h + 'px;' +
+        'border:2px solid #2563eb;background:rgba(37,99,235,0.08);border-radius:3px;' +
+        'font-size:10px;color:#2563eb;line-height:1.2">' +
+        d.tw + '&times;' + d.th + '</div>' +
+      '<div style="font-size:9px;color:var(--ink2);margin-top:2px">Tapa (cm)</div>' +
+      (dp ? '<div style="display:inline-flex;align-items:center;justify-content:center;margin-top:6px;' +
+        'width:' + w + 'px;height:' + dp + 'px;' +
+        'border:2px solid #059669;background:rgba(5,150,105,0.08);border-radius:3px;' +
+        'font-size:10px;color:#059669;line-height:1.2">' +
+        d.prof + ' cm</div>' +
+        '<div style="font-size:9px;color:var(--ink2);margin-top:2px">Profundidad</div>' : '') +
+    '</div>';
+  }).join('');
+
+  return '<div class="card"><div class="chd"><span class="ct">Vista proporcional</span>' +
+    '<span class="cn">Escala relativa entre cajas</span></div><div class="cbd">' +
+    '<div style="display:flex;flex-wrap:wrap;gap:28px;align-items:flex-end;padding:8px 0">' +
+    items + '</div></div></div>';
+}
+
 function renderCajas() {
   var custom = cajasCustom();
   var todas = CAJAS_ENEL.concat(custom);
@@ -85,6 +131,8 @@ function renderCajas() {
         '<button class="btn btnp" id="cj-agregar">Agregar caja</button>' +
       '</div>' +
     '</div></div>' +
+
+    seccionVisualCajas(ver) +
 
     '<div class="note"><div class="notet">Fuente de datos</div>' +
       '<div class="noteb">Dimensiones tomadas de las normas de construcción Enel Colombia (CS274, CS275, CS276, CS277). ' +
