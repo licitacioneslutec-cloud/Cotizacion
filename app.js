@@ -33,6 +33,8 @@ function render() {
   if (vista.pantalla === "precios") return renderPrecios();
   if (vista.pantalla === "ofertas") return renderOfertas();
   if (vista.pantalla === "sync") return renderSync();
+  if (vista.pantalla === "llenado") return renderLlenado();
+  if (vista.pantalla === "cajas") return renderCajas();
   if (vista.pantalla === "proyectos") return renderProyectos();
   if (vista.pantalla === "nuevo") return renderNuevo();
   return renderProyecto();
@@ -47,6 +49,8 @@ function barraTop(activa) {
   return '<div class="tira"><div class="wrap tirain">' +
     '<button class="tirab' + (activa === "proyectos" ? " on" : "") + '" data-top="proyectos">Proyectos</button>' +
     '<button class="tirab' + (activa === "catalogo" ? " on" : "") + '" data-top="catalogo">Catálogo de insumos</button>' +
+    '<button class="tirab' + (activa === "llenado" ? " on" : "") + '" data-top="llenado">Llenado tubería</button>' +
+    '<button class="tirab' + (activa === "cajas" ? " on" : "") + '" data-top="cajas">Cajas Enel</button>' +
     '<div class="tirasync">' +
       '<span id="syncestado" class="syncestado"></span>' +
       '<button class="tirab" data-top="sync">Sincronización</button>' +

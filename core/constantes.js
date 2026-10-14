@@ -23,7 +23,8 @@ var PASOS = [
   { id: "armado",    n: 3, nombre: "Armado" },
   { id: "apartados", n: 4, nombre: "Apartados" },
   { id: "insumos",   n: 5, nombre: "Insumos" },
-  { id: "entrega",   n: 6, nombre: "Entrega" }
+  { id: "entrega",   n: 6, nombre: "Entrega" },
+  { id: "bolsa",     n: 7, nombre: "Bolsa eléctrica" }
 ];
 
 /* Roles de columna que buscamos en el encabezado del anexo */

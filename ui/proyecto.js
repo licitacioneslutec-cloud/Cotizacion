@@ -499,7 +499,8 @@ function renderProyecto() {
     vista.paso === "anexo" ? vAnexo(p) :
     vista.paso === "armado" ? vArmado(p, r) :
     vista.paso === "apartados" ? vApartados(p) :
-    vista.paso === "insumos" ? vInsumos(p) : vEntrega(p);
+    vista.paso === "insumos" ? vInsumos(p) :
+    vista.paso === "entrega" ? vEntrega(p) : vBolsa(p);
 
   app.innerHTML =
     '<div class="tira"><div class="wrap tirain">' +
@@ -533,6 +534,7 @@ function renderProyecto() {
   if (vista.paso === "apartados") enlazarApartados(p);
   if (vista.paso === "insumos") enlazarInsumos(p);
   if (vista.paso === "entrega") enlazarEntrega(p);
+  if (vista.paso === "bolsa") enlazarBolsa(p);
 }
 
 /* ---- 7.4 Paso 1: ficha ---- */
