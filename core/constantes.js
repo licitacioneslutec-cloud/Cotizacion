@@ -17,6 +17,8 @@ var APARTADOS = [
   { id: "mo", nombre: "Módulos" }
 ];
 
+var URL_IA = "/.netlify/functions/sugerir-apu";
+
 var PASOS = [
   { id: "ficha",     n: 1, nombre: "Ficha" },
   { id: "anexo",     n: 2, nombre: "Anexo del cliente" },

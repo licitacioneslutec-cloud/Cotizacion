@@ -85,6 +85,7 @@ function vApartados(p) {
         esc(vista.filtroApu || '') + '"></div>' +
       '<div style="padding:0 10px 8px"><input class="in" id="filtroinsumo" placeholder="Buscar por código de insumo" value="' +
         esc(vista.filtroApuInsumo || '') + '"></div>' +
+      '<div style="padding:0 10px 8px"><button class="btn" id="btnIALote" style="font-size:11px;width:100%">Sugerir todos con IA</button></div>' +
       '<div class="alist" id="listaapu">' + listaApu(p, listaFiltrada, act) + '</div></div>' +
       '<div id="panelapu">' + panelApu(p, cat, act) + '</div>' +
     '</div>';
@@ -581,6 +582,7 @@ function panelApu(p, cat, act) {
         '<div class="m" style="font-size:11px;color:var(--ink3);margin-top:7px">' +
         act.items.map(function (x) { return fmt(x.cant) + " " + esc(x.und); }).join("  ·  ") + '</div>' +
       '</div></div>' +
+    '<div style="padding:4px 0"><button class="btn btnp" id="btnIA" style="font-size:12px">Sugerir con IA</button></div>' +
     avisoPend + formSA + formCA + formTU + formEQ + formTA + formMO + reglas + avisos + tabla + buscaInsumo +
     '<div class="card"><div class="chd"><span class="ct">Consideraciones del análisis</span></div>' +
       '<div class="cbd"><textarea class="in" id="notaapu" ' +
@@ -1205,6 +1207,12 @@ function enlazarPanel(p) {
     p.notasApu[act.apu] = this.value;
     Store.guardar(p);
   };
+
+  var btnIA = document.getElementById("btnIA");
+  if (btnIA) btnIA.onclick = function () { pedirSugerenciaIA(p, act.apu); };
+
+  var btnIALote = document.getElementById("btnIALote");
+  if (btnIALote) btnIALote.onclick = function () { pedirSugerenciaLote(p); };
 }
 
 function enlazarApartados(p) {
