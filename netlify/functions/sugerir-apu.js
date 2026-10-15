@@ -110,7 +110,8 @@ exports.handler = async function (event) {
 
   if (!res.ok) return reply(res.status, { error: data.error || data });
 
-  let text = (data.content && data.content[0] && data.content[0].text) || "";
+  const textBlock = (data.content || []).find(b => b.type === "text");
+  let text = (textBlock && textBlock.text) || "";
   text = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
   try {
     return reply(200, { sugerencia: JSON.parse(text), usage: data.usage });
