@@ -114,7 +114,9 @@ exports.handler = async function (event) {
   let text = (textBlock && textBlock.text) || "";
   text = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
   try {
-    return reply(200, { sugerencia: JSON.parse(text), usage: data.usage });
+    let parsed = JSON.parse(text);
+    if (Array.isArray(parsed) && parsed.length === 1 && !body.lote) parsed = parsed[0];
+    return reply(200, { sugerencia: parsed, usage: data.usage });
   } catch (e) {
     return reply(200, { raw: text, error: "La respuesta no es JSON válido", usage: data.usage });
   }
