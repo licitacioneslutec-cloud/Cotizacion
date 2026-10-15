@@ -75,7 +75,10 @@ function postIA(body) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
   }).then(function (res) {
-    if (!res.ok) throw new Error("HTTP " + res.status);
+    if (!res.ok) return res.json().catch(function () { return {}; }).then(function (j) {
+      var msg = (j.error && j.error.message) || (j.error && typeof j.error === "string" && j.error) || ("HTTP " + res.status);
+      throw new Error(msg);
+    });
     return res.json();
   });
 }

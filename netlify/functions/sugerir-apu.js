@@ -55,13 +55,11 @@ exports.handler = async function (event) {
       headers: {
         "Content-Type": "application/json",
         "anthropic-version": "2023-06-01",
-        "anthropic-beta": "prompt-caching-2024-07-31",
         "x-api-key": apiKey,
       },
       body: JSON.stringify({
-        model: "claude-3-5-haiku-20241022",
+        model: "claude-haiku-5-5",
         max_tokens: 2048,
-        temperature: 0,
         system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
         messages: [{ role: "user", content: JSON.stringify(body) }],
       }),
