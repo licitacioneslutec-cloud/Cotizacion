@@ -107,6 +107,7 @@ function pedirSugerenciaIA(p, apu) {
   postIA({ items: itemsIA(act.items), cod: faltan, opciones: extraerOpcionesComp(cat) })
     .then(function (j) {
       var sug = j.sugerencia;
+      if (!sug && j.raw) try { sug = JSON.parse(j.raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "")); } catch (e) {}
       if (!sug) throw new Error("respuesta sin sugerencia");
       cacheIA.guardar(desc, sug);
       mostrarPreviewIA(p, apu, sug);
