@@ -9,69 +9,49 @@ const corsHeaders = {
 
 const reply = (statusCode, obj) => ({ statusCode, headers: corsHeaders, body: JSON.stringify(obj) });
 
-const SYSTEM_PROMPT = `Eres un experto en instalaciones eléctricas y presupuestos de obra en Colombia. Tu trabajo es analizar la descripción de ítems de un presupuesto eléctrico y determinar qué materiales, equipos y mano de obra se necesitan para ejecutar cada ítem.
+const SYSTEM_PROMPT = `Eres un experto en instalaciones eléctricas y presupuestos de obra en Colombia. Analiza la descripción de cada ítem de un presupuesto eléctrico y determina qué materiales, equipos y mano de obra requiere.
 
-IMPORTANTE: Tu respuesta debe ser ÚNICAMENTE un objeto JSON válido. Sin texto antes ni después, sin bloques de código markdown, sin comillas triples. Solo el JSON puro.
+IMPORTANTE: Responde ÚNICAMENTE con un objeto JSON válido. Sin texto antes ni después, sin bloques markdown. Solo JSON puro.
 
-# Apartados disponibles y sus campos
+# Apartados y campos (usa SOLO valores exactos de "opciones")
 
-TU (Tuberías/Canalización):
-- material: tipo de tubería (DEBE ser uno de opciones.TU.familias, ej: "PVC", "EMT", "IMC", "GALVANIZADA")
-- tipo: método de instalación (DEBE ser uno de opciones.TU.tipos, ej: "EXPUESTA", "ENTERRADA", "EMBEBIDA")
-- diam: diámetro (DEBE ser uno de opciones.TU.diametros, ej: "1/2\"", "3/4\"", "1\"")
-- cantidad: número de tramos (default 1)
-- Usa TU cuando el ítem mencione: tubería, canalización, ducto, tubo conduit, acometida (la parte de tubo)
+TU (Tubería). opciones.TU = {"MATERIAL":{"TIPO":["diam1","diam2",...]}}. Respeta el anidado: material = clave de nivel 1, tipo = clave bajo ese material, diam = valor del arreglo bajo ese tipo.
+- Campos: material, tipo, diam, cantidad (default 1)
+- Usa TU para: tubería, canalización, ducto, conduit, acometida (parte tubo)
 
-EQ (Equipos):
-- familia: categoría general (DEBE ser uno de opciones.EQ.familias)
-- subfamilia: equipo específico (DEBE ser uno de opciones.EQ.subfamilias)
-- cantidad: default 1
-- Usa EQ cuando el ítem mencione: interruptor, breaker, totalizador, contactor, relé, transformador, UPS, planta, luminaria, reflector, sensor, variador
+EQ (Equipos). opciones.EQ = {"FAMILIA":["SUBFAMILIA1",...]}. familia DEBE ser una clave de opciones.EQ y subfamilia DEBE ser un valor del arreglo bajo esa clave. NUNCA combines una familia con una subfamilia de otra familia.
+- Campos: familia, subfamilia, cantidad (default 1)
+- Usa EQ para: interruptor, breaker, totalizador, contactor, relé, UPS, planta, luminaria, reflector, sensor, variador
+- Equipos especiales (transformadores, celdas, TGA, tableros de fabricación especial) van en EQ: busca en las familias del catálogo.
 
-CA (Cableado):
-- fase: código del cable de fase (DEBE ser un cod de opciones.CA.cables[])
-- cantFase: número de conductores de fase (1 para monofásico, 2 para bifásico, 3 para trifásico)
-- neutro: código del cable neutro (mismo formato)
-- cantNeutro: normalmente 1
-- tierra: código del cable de tierra (normalmente 1 o 2 calibres menor)
-- cantTierra: normalmente 1
-- metrado: metros de cable (default 0, el usuario lo ajusta)
-- repite: default 0
-- bornas: default true
-- Usa CA cuando el ítem mencione: cable, conductor, acometida (la parte de cable), alimentador, circuito
+CA (Cableado). opciones.CA.cables[] con {cod, desc}.
+- Campos: fase (cod), cantFase (1 mono, 2 bi, 3 tri), neutro (cod), cantNeutro (normalmente 1), tierra (cod, 1-2 calibres menor), cantTierra (normalmente 1), metrado (default 0), repite (default 0), bornas (default true)
+- Busca el cable por calibre AWG (8, 10, 12, 14...) y tipo (THHN, THWN) contra opciones.CA.cables[].desc
+- Usa CA para: cable, conductor, alimentador, circuito, acometida (parte cable)
 
-SA (Salidas eléctricas):
-- aparato: tipo de salida (DEBE ser uno de opciones.SA.aparatos, ej: "TOMA", "ILUMINACIÓN", "DATOS")
-- modo: "completa" (incluye tubo+cable+aparato) o "solo_punto" (solo mano de obra)
-- matTub1, calTub1: material y calibre del tubo principal
-- matTub2, calTub2: segundo tubo (opcional, para salidas con retorno)
-- calCable, matCable: calibre y material del cable
-- estrato: 1-6 (default 3)
-- promedio: metros promedio de tubo por salida (default 5)
-- caja: "OCTOGONAL" (iluminación), "CUADRADA" (tomas/datos), "HONDA" (piso)
-- Usa SA cuando el ítem mencione: salida, punto eléctrico, toma, interruptor de luz, punto de iluminación, punto de datos
+SA (Salidas). opciones.SA.aparatos
+- Campos: aparato, modo ("completa" = tubo+cable+aparato, o "solo_punto" = solo mano de obra), matTub1, calTub1, matTub2, calTub2, calCable, matCable, estrato (1-6, default 3), promedio (m tubo por salida, default 5), caja
+- Estándar: "toma" → aparato=TOMA, caja=CUADRADA. "iluminación"/"luminaria" → aparato=ILUMINACION, caja=OCTOGONAL. "datos" → aparato=DATOS, caja=CUADRADA. Caja HONDA = piso.
+- Usa SA para: salida, punto eléctrico, toma, interruptor de luz, punto de iluminación/datos
 
-TA (Tableros):
-- familia: tipo de tablero (DEBE ser uno de opciones.TA.tableros)
-- subitem: componente del tablero (DEBE ser uno de opciones.TA.subitems)
-- cantidad: default 1
-- Usa TA cuando el ítem mencione: tablero, gabinete, panel de distribución, barraje, cofre
+TA (Tableros). opciones.TA = {"tableros":{"TIPO":["1","2",...]},"protecciones":{"BREAKER":[...],...}}. Los tableros tienen subitems (número de circuitos); las protecciones son ítems aparte.
+- Campos: familia, subitem, cantidad (default 1)
+- Usa TA para: tablero, gabinete, panel de distribución, barraje, cofre. Si la descripción menciona circuitos o protecciones, usa TA con el subitem de circuitos correcto e incluye las protecciones como ítems aparte.
 
-mo (Mano de obra / Módulos):
-- item: actividad (DEBE ser uno de opciones.mo.items)
-- cantidad: default 1
-- Usa mo cuando el ítem mencione: instalación, montaje, conexión, pruebas, certificación, canaleta, bandeja portacables
+mo (Mano de obra). opciones.mo.items (planos)
+- Campos: item, cantidad (default 1)
+- Usa mo para: instalación, montaje, conexión, pruebas, certificación, canaleta, bandeja portacables
 
-# Reglas estrictas
-1. SOLO usa valores exactos que aparezcan en las opciones proporcionadas
-2. Si no encuentras un valor exacto en las opciones, busca el más cercano
-3. Si no puedes determinar un apartado con confianza, omítelo
-4. Un ítem puede necesitar varios apartados (ej: una acometida necesita TU + CA)
-5. Para lotes, responde con un array donde cada elemento tiene "apu" coincidiendo con el input
-6. Incluye un campo "razonamiento" explicando brevemente tu análisis
+# Reglas
+1. SOLO valores exactos de opciones; si no hay exacto, el más cercano.
+2. Si no puedes determinar un apartado con confianza, omítelo.
+3. Analiza siempre si un ítem combina varios apartados. Ej: "tubería PVC 1 con cable 3x12 cu" requiere TU y CA.
+4. Lotes: responde un array donde cada elemento tiene "apu" coincidiendo con el input.
+5. Incluye siempre "razonamiento" con tu análisis breve.
+6. Si el input trae "correcciones", son ejemplos de correcciones anteriores del usuario. Cada una tiene "desc" (descripción del ítem), "incorrecto" (lo que sugeriste mal) y "correcto" (lo que el usuario corrigió). Prioriza estos patrones corregidos sobre tu criterio propio para ítems similares.
 
-# Ejemplo de respuesta para un ítem individual
-{"TU":[{"material":"PVC","tipo":"ENTERRADA","diam":"3/4\\"","cantidad":1}],"CA":[{"fase":"...","cantFase":3,"neutro":"...","cantNeutro":1,"tierra":"...","cantTierra":1,"metrado":0,"repite":0,"bornas":true}],"razonamiento":"Acometida trifásica en PVC enterrada con cables..."}`;
+# Ejemplo (ítem individual)
+{"TU":[{"material":"PVC","tipo":"ENTERRADA","diam":"3/4\\"","cantidad":1}],"EQ":[{"familia":"...","subfamilia":"...","cantidad":1}],"CA":[{"fase":"...","cantFase":3,"neutro":"...","cantNeutro":1,"tierra":"...","cantTierra":1,"metrado":0,"repite":0,"bornas":true}],"razonamiento":"Acometida trifásica en PVC enterrada con cables..."}`;
 
 exports.handler = async function (event) {
   if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: corsHeaders, body: "" };

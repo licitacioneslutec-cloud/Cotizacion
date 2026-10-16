@@ -85,7 +85,8 @@ function vApartados(p) {
         esc(vista.filtroApu || '') + '"></div>' +
       '<div style="padding:0 10px 8px"><input class="in" id="filtroinsumo" placeholder="Buscar por código de insumo" value="' +
         esc(vista.filtroApuInsumo || '') + '"></div>' +
-      '<div style="padding:0 10px 8px"><button class="btn" id="btnIALote" style="font-size:11px;width:100%">Sugerir todos con IA</button></div>' +
+      '<div style="padding:0 10px 8px;display:flex;gap:4px"><button class="btn" id="btnIALote" style="font-size:11px;flex:1">Sugerir todos con IA</button>' +
+      '<button class="btn" id="btnLimpiarCache" style="font-size:10px;padding:2px 6px;color:var(--ink3)" title="Borrar caché de sugerencias IA">🗑</button></div>' +
       '<div class="alist" id="listaapu">' + listaApu(p, listaFiltrada, act) + '</div></div>' +
       '<div id="panelapu">' + panelApu(p, cat, act) + '</div>' +
     '</div>';
@@ -706,6 +707,7 @@ function enlazarLista(p) {
 }
 
 function enlazarPanel(p) {
+  capturarCorreccionIA(p);
   var act = apuActivo(p);
   if (!act) return;
 
@@ -1213,6 +1215,14 @@ function enlazarPanel(p) {
 
   var btnIALote = document.getElementById("btnIALote");
   if (btnIALote) btnIALote.onclick = function () { pedirSugerenciaLote(p); };
+
+  var btnLC = document.getElementById("btnLimpiarCache");
+  if (btnLC) btnLC.onclick = function () {
+    if (confirm("¿Borrar caché de sugerencias IA?")) {
+      cacheIA.limpiar();
+      avisoOk("Caché de IA limpiado");
+    }
+  };
 }
 
 function enlazarApartados(p) {
