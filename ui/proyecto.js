@@ -1047,6 +1047,7 @@ function vArmado(p, r) {
   var extraCols = (verPct ? 2 : 0) + (sep ? (verTot ? 4 : 2) : (verTot ? 2 : 1));
   var colspan = 7 + extraCols + 1;
   var ordenActivo = !!vista.ordenArmado;
+  var ordenUnit = vista.ordenArmado === "unitDesc" || vista.ordenArmado === "unitAsc";
 
   var filasParaRender;
   if (ordenActivo) {
@@ -1061,11 +1062,13 @@ function vArmado(p, r) {
       if (vista.soloSinApu && f.apu) return;
       var a = f.apu ? (t.porApu[f.apu] || {}) : {};
       var qf = p.usarCantObs && f.cantObs ? (Number(f.cantObs) || 0) : (Number(f.cant) || 0);
-      var val = sep ? ((a.matConTh ? matItem(a.matConTh) : 0) + (a.mo || 0)) * qf : (a.unitario || 0) * qf;
+      var unitVal = sep ? ((a.matConTh ? matItem(a.matConTh) : 0) + (a.mo || 0)) : (a.unitario || 0);
+      var val = ordenUnit ? unitVal : unitVal * qf;
       filasParaRender.push({ f: f, fi: fi, _val: val });
     });
     filasParaRender.sort(function (a, b) {
-      return vista.ordenArmado === "asc" ? a._val - b._val : b._val - a._val;
+      var asc = vista.ordenArmado === "asc" || vista.ordenArmado === "unitAsc";
+      return asc ? a._val - b._val : b._val - a._val;
     });
   } else {
     filasParaRender = h.filas.map(function (f, fi) { return { f: f, fi: fi }; });
@@ -1177,14 +1180,15 @@ function vArmado(p, r) {
     ? '<th style="width:52px;text-align:right">% Mat</th><th style="width:52px;text-align:right">% MO</th>'
     : '';
 
-  var flechaOrd = vista.ordenArmado === "desc" ? " ▼" : vista.ordenArmado === "asc" ? " ▲" : "";
+  var flechaTot = vista.ordenArmado === "desc" ? " ▼" : vista.ordenArmado === "asc" ? " ▲" : "";
+  var flechaUnit = vista.ordenArmado === "unitDesc" ? " ▼" : vista.ordenArmado === "unitAsc" ? " ▲" : "";
   var encPrecio = sep
-    ? '<th style="width:88px;text-align:right">Sumin. unit</th>' +
-      (verTot ? '<th style="width:92px;text-align:right;cursor:pointer" id="thvaltot" title="Ordenar por valor">Sumin. total' + flechaOrd + '</th>' : '') +
+    ? '<th style="width:88px;text-align:right;cursor:pointer" id="thvalunit" title="Ordenar por valor unitario">Sumin. unit' + flechaUnit + '</th>' +
+      (verTot ? '<th style="width:92px;text-align:right;cursor:pointer" id="thvaltot" title="Ordenar por valor total">Sumin. total' + flechaTot + '</th>' : '') +
       '<th style="width:88px;text-align:right">M.O. unit</th>' +
       (verTot ? '<th style="width:92px;text-align:right">M.O. total</th>' : '')
-    : '<th style="width:100px;text-align:right">Vr. unitario</th>' +
-      (verTot ? '<th style="width:104px;text-align:right;cursor:pointer" id="thvaltot" title="Ordenar por valor">Vr. total' + flechaOrd + '</th>' : '');
+    : '<th style="width:100px;text-align:right;cursor:pointer" id="thvalunit" title="Ordenar por valor unitario">Vr. unitario' + flechaUnit + '</th>' +
+      (verTot ? '<th style="width:104px;text-align:right;cursor:pointer" id="thvaltot" title="Ordenar por valor total">Vr. total' + flechaTot + '</th>' : '');
 
   return '<div class="card">' +
       '<div class="chd"><span class="ct">Armado de análisis</span>' +
@@ -1231,7 +1235,11 @@ function vArmado(p, r) {
 function enlazarArmado(p) {
   var thvt = document.getElementById("thvaltot");
   if (thvt) thvt.onclick = function () {
-    ir({ ordenArmado: vista.ordenArmado === null ? "desc" : vista.ordenArmado === "desc" ? "asc" : null });
+    ir({ ordenArmado: vista.ordenArmado === "desc" ? "asc" : vista.ordenArmado === "asc" ? null : "desc" });
+  };
+  var thvu = document.getElementById("thvalunit");
+  if (thvu) thvu.onclick = function () {
+    ir({ ordenArmado: vista.ordenArmado === "unitDesc" ? "unitAsc" : vista.ordenArmado === "unitAsc" ? null : "unitDesc" });
   };
   var ff = document.getElementById("filtroarmado");
   if (ff) ff.oninput = function () {
