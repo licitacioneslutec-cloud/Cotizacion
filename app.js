@@ -11,7 +11,8 @@
 
 var vista = { pantalla: "proyectos", pid: null, paso: "ficha", hoja: 0, sel: [], borrador: null,
               precios: null, busca: "", soloSin: false, apu: null, filtroArmadoApu: "",
-              filtroApuCat: null, filtroApuInsumo: "", buscaHist: "" };
+              filtroApuCat: null, filtroApuInsumo: "", buscaHist: "",
+              ordenIns: null, ordenArmado: null };
 var app = document.getElementById("app");
 
 function ir(cambios) {

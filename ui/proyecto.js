@@ -1046,16 +1046,44 @@ function vArmado(p, r) {
 
   var extraCols = (verPct ? 2 : 0) + (sep ? (verTot ? 4 : 2) : (verTot ? 2 : 1));
   var colspan = 7 + extraCols + 1;
+  var ordenActivo = !!vista.ordenArmado;
+
+  var filasParaRender;
+  if (ordenActivo) {
+    filasParaRender = [];
+    h.filas.forEach(function (f, fi) {
+      if (f.tipo === "cap") return;
+      if (tokens.length) {
+        var txt = ((f.desc || "") + " " + (f.item || "")).toLowerCase();
+        if (!tokens.every(function (tk) { return txt.indexOf(tk) >= 0; })) return;
+      }
+      if (filtroApu && String(f.apu || "").indexOf(filtroApu) < 0) return;
+      if (vista.soloSinApu && f.apu) return;
+      var a = f.apu ? (t.porApu[f.apu] || {}) : {};
+      var qf = p.usarCantObs && f.cantObs ? (Number(f.cantObs) || 0) : (Number(f.cant) || 0);
+      var val = sep ? ((a.matConTh ? matItem(a.matConTh) : 0) + (a.mo || 0)) * qf : (a.unitario || 0) * qf;
+      filasParaRender.push({ f: f, fi: fi, _val: val });
+    });
+    filasParaRender.sort(function (a, b) {
+      return vista.ordenArmado === "asc" ? a._val - b._val : b._val - a._val;
+    });
+  } else {
+    filasParaRender = h.filas.map(function (f, fi) { return { f: f, fi: fi }; });
+  }
+
   var cuerpo = "", capPend = null, visibles = 0;
-  h.filas.forEach(function (f, fi) {
+  filasParaRender.forEach(function (item) {
+    var f = item.f, fi = item.fi;
     if (f.tipo === "cap") { capPend = { f: f, fi: fi }; return; }
-    if (tokens.length) {
-      var txt = ((f.desc || "") + " " + (f.item || "")).toLowerCase();
-      if (!tokens.every(function (t) { return txt.indexOf(t) >= 0; })) return;
+    if (!ordenActivo) {
+      if (tokens.length) {
+        var txt = ((f.desc || "") + " " + (f.item || "")).toLowerCase();
+        if (!tokens.every(function (t) { return txt.indexOf(t) >= 0; })) return;
+      }
+      if (filtroApu && String(f.apu || "").indexOf(filtroApu) < 0) return;
+      if (vista.soloSinApu && f.apu) return;
     }
-    if (filtroApu && String(f.apu || "").indexOf(filtroApu) < 0) return;
-    if (vista.soloSinApu && f.apu) return;
-    if (capPend && !filtro) {
+    if (capPend && !filtro && !ordenActivo) {
       var capDel = capPend.f.manual ? ' <button class="btnx" data-borrarfila="' + vista.hoja + ':' + capPend.fi + '" title="Eliminar capítulo" style="color:#c00;font-size:13px;margin-left:6px">×</button>' : '';
       cuerpo += '<tr class="caprow"><td colspan="' + colspan + '">' + esc(capPend.f.item) + ' · ' + esc(capPend.f.desc) + capDel + '</td></tr>';
       capPend = null;
@@ -1065,10 +1093,13 @@ function vArmado(p, r) {
     var marcada = vista.sel.indexOf(k) >= 0;
     var comparte = f.apu && cuenta[f.apu] > 1;
 
-    var prev = h.filas[fi - 1], next = h.filas[fi + 1];
-    var antes = prev && prev.tipo === "it" && prev.apu && prev.apu === f.apu;
-    var desp = next && next.tipo === "it" && next.apu && next.apu === f.apu;
-    var tie = comparte ? " class=\"tie" + (!antes ? " tietop" : (desp ? "" : " tiebot")) + "\"" : "";
+    var tie = "";
+    if (!ordenActivo && comparte) {
+      var prev = h.filas[fi - 1], next = h.filas[fi + 1];
+      var antes = prev && prev.tipo === "it" && prev.apu && prev.apu === f.apu;
+      var desp = next && next.tipo === "it" && next.apu && next.apu === f.apu;
+      tie = " class=\"tie" + (!antes ? " tietop" : (desp ? "" : " tiebot")) + "\"";
+    }
 
     /* precio del análisis de este ítem: unitario y total (× cantidad de este ítem) */
     var a = f.apu ? (t.porApu[f.apu] || {}) : {};
@@ -1146,13 +1177,14 @@ function vArmado(p, r) {
     ? '<th style="width:52px;text-align:right">% Mat</th><th style="width:52px;text-align:right">% MO</th>'
     : '';
 
+  var flechaOrd = vista.ordenArmado === "desc" ? " ▼" : vista.ordenArmado === "asc" ? " ▲" : "";
   var encPrecio = sep
     ? '<th style="width:88px;text-align:right">Sumin. unit</th>' +
-      (verTot ? '<th style="width:92px;text-align:right">Sumin. total</th>' : '') +
+      (verTot ? '<th style="width:92px;text-align:right;cursor:pointer" id="thvaltot" title="Ordenar por valor">Sumin. total' + flechaOrd + '</th>' : '') +
       '<th style="width:88px;text-align:right">M.O. unit</th>' +
       (verTot ? '<th style="width:92px;text-align:right">M.O. total</th>' : '')
     : '<th style="width:100px;text-align:right">Vr. unitario</th>' +
-      (verTot ? '<th style="width:104px;text-align:right">Vr. total</th>' : '');
+      (verTot ? '<th style="width:104px;text-align:right;cursor:pointer" id="thvaltot" title="Ordenar por valor">Vr. total' + flechaOrd + '</th>' : '');
 
   return '<div class="card">' +
       '<div class="chd"><span class="ct">Armado de análisis</span>' +
@@ -1197,6 +1229,10 @@ function vArmado(p, r) {
 }
 
 function enlazarArmado(p) {
+  var thvt = document.getElementById("thvaltot");
+  if (thvt) thvt.onclick = function () {
+    ir({ ordenArmado: vista.ordenArmado === null ? "desc" : vista.ordenArmado === "desc" ? "asc" : null });
+  };
   var ff = document.getElementById("filtroarmado");
   if (ff) ff.oninput = function () {
     vista.filtroArmado = this.value;

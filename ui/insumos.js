@@ -71,6 +71,15 @@ function vInsumos(p) {
     if (i.mo) totalMo += v; else totalMat += v;
   });
 
+  if (vista.ordenIns) {
+    ver = ver.slice();
+    ver.sort(function (a, b) {
+      var va = a.cantidad * precioAjustado({ precio: a.precio, imp: a.imp, rent: a.rent, ofertas: a.ofertas, sel: a.sel, cod: a.cod }, mg, p);
+      var vb = b.cantidad * precioAjustado({ precio: b.precio, imp: b.imp, rent: b.rent, ofertas: b.ofertas, sel: b.sel, cod: b.cod }, mg, p);
+      return vista.ordenIns === "asc" ? va - vb : vb - va;
+    });
+  }
+
   var rent = Number(mg.rent) || 0, ivImp = Number(mg.dolar) || 0;
   var filas = ver.map(function (i) {
     var itRef = { precio: i.precio, imp: i.imp, rent: i.rent, ofertas: i.ofertas, sel: i.sel, cod: i.cod };
@@ -155,7 +164,8 @@ function vInsumos(p) {
         '<th style="width:150px">Proveedor</th>' +
         '<th style="width:40px;text-align:center" title="Aplica IVA">IVA</th>' +
         '<th style="width:40px;text-align:center" title="Aplica Rentabilidad">Rent.</th>' +
-        '<th class="num" style="width:104px">Vale</th>' +
+        '<th class="num" style="width:104px;cursor:pointer" id="thvale" title="Ordenar por valor">' +
+          'Vale' + (vista.ordenIns === "desc" ? " ▼" : vista.ordenIns === "asc" ? " ▲" : "") + '</th>' +
       '</tr></thead><tbody>' +
         filas + '</tbody></table></div>' +
     '</div>' +
@@ -167,6 +177,10 @@ function vInsumos(p) {
 }
 
 function enlazarInsumos(p) {
+  var thv = document.getElementById("thvale");
+  if (thv) thv.onclick = function () {
+    ir({ ordenIns: vista.ordenIns === null ? "desc" : vista.ordenIns === "desc" ? "asc" : null });
+  };
   var b = document.getElementById("buscains");
   if (b) b.oninput = function () {
     vista.buscaIns = this.value;

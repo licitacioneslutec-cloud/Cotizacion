@@ -327,35 +327,37 @@ function exportarTodo(p) {
   m.getCell("B" + fila).font = { bold: true, size: 11, color: { argb: "FFFFFFFF" } };
   m.getCell("B" + fila).fill = fill(NAVY);
   fila++;
-  var res = function (k, v, fuerte) {
+  var memFilas = {};
+  var res = function (k, v, fuerte, tag) {
     m.getCell("B" + fila).value = k;
     if (fuerte) m.getCell("B" + fila).font = { bold: true, color: { argb: NAVY } };
     m.mergeCells("C" + fila + ":D" + fila);
     var c = m.getCell("E" + fila);
     c.value = v; c.numFmt = moneda; c.alignment = { horizontal: "right" };
     if (fuerte) c.font = { bold: true, color: { argb: NAVY } };
+    if (tag) memFilas[tag] = fila;
     fila++;
   };
   if (sep) {
-    res("Materiales · subtotal", materialVisibleTotal);
-    res("IVA " + (mg.iva || 0) + "%", materialVisibleIva);
-    res("Total materiales", materialVisibleTotalConIva, true);
-    res("Mano de obra · subtotal", manoObraVisibleTotal);
-    res("Administración " + (mg.admin || 0) + "%", t.moAdmin);
-    res("Imprevistos " + (mg.imprev || 0) + "%", t.moImprev);
-    res("Utilidad " + (mg.util || 0) + "%", t.moUtil);
-    res("IVA sobre la utilidad " + (mg.iva || 0) + "%", t.moIva);
-    res("Total mano de obra", t.totalMo, true);
+    res("Materiales · subtotal", materialVisibleTotal, false, "matSubt");
+    res("IVA " + (mg.iva || 0) + "%", materialVisibleIva, false, "matIva");
+    res("Total materiales", materialVisibleTotalConIva, true, "totMat");
+    res("Mano de obra · subtotal", manoObraVisibleTotal, false, "moSubt");
+    res("Administración " + (mg.admin || 0) + "%", t.moAdmin, false, "moAdmin");
+    res("Imprevistos " + (mg.imprev || 0) + "%", t.moImprev, false, "moImprev");
+    res("Utilidad " + (mg.util || 0) + "%", t.moUtil, false, "moUtil");
+    res("IVA sobre la utilidad " + (mg.iva || 0) + "%", t.moIva, false, "moIva");
+    res("Total mano de obra", t.totalMo, true, "totMo");
     fila++;
-    res("VALOR TOTAL", t.totalSep, true);
+    res("VALOR TOTAL", t.totalSep, true, "totalSep");
   } else {
-    res("Subtotal · costo directo", t.subtotal);
-    res("Administración " + (mg.admin || 0) + "%", t.admin);
-    res("Imprevistos " + (mg.imprev || 0) + "%", t.imprev);
-    res("Utilidad " + (mg.util || 0) + "%", t.util);
-    res("IVA sobre utilidad", t.iva);
+    res("Subtotal · costo directo", t.subtotal, false, "subtotal");
+    res("Administración " + (mg.admin || 0) + "%", t.admin, false, "admin");
+    res("Imprevistos " + (mg.imprev || 0) + "%", t.imprev, false, "imprev");
+    res("Utilidad " + (mg.util || 0) + "%", t.util, false, "util");
+    res("IVA sobre utilidad", t.iva, false, "iva");
     fila++;
-    res("VALOR TOTAL", t.total, true);
+    res("VALOR TOTAL", t.total, true, "total");
   }
   m.getCell("E" + (fila - 1)).fill = fill(GRIS);
   m.getCell("B" + (fila - 1)).fill = fill(GRIS);
@@ -381,8 +383,8 @@ function exportarTodo(p) {
   m.mergeCells("B" + fila + ":E" + fila);
   m.getCell("B" + fila).fill = fill(NAVY);
   fila++;
-  res((p.anticipo || 0) + "% ANTICIPO", t.total * (p.anticipo || 0) / 100);
-  res((100 - (p.anticipo || 0)) + "% AVANCE DE OBRA", t.total * (100 - (p.anticipo || 0)) / 100);
+  res((p.anticipo || 0) + "% ANTICIPO", t.total * (p.anticipo || 0) / 100, false, "anticipo");
+  res((100 - (p.anticipo || 0)) + "% AVANCE DE OBRA", t.total * (100 - (p.anticipo || 0)) / 100, false, "avance");
 
   fila += 1;
   m.getCell("B" + fila).value = "VALIDEZ DE LA OFERTA";
@@ -516,6 +518,35 @@ function exportarTodo(p) {
     totCotFormula("AIU", "G" + sub + "*(" + pA + "+" + pI + "+" + pU + ")", t.admin + t.imprev + t.util, 6);
     totCotFormula("IVA sobre utilidad", "G" + sub + "*" + pU + "*" + pV, t.iva, 6);
     totCotFormula("VALOR TOTAL", "SUM(G" + sub + ":G" + (sub + 2) + ")", t.total, 6);
+  }
+
+  /* Parchear Membrete: reemplazar valores estáticos con fórmulas que enlazan a Cotización */
+  var mf = function (row, formula, result) {
+    var c = m.getCell("E" + row);
+    c.value = { formula: formula, result: result || 0 };
+  };
+  if (sep) {
+    mf(memFilas.matSubt, "'Cotización'!G" + sMat, materialVisibleTotal);
+    mf(memFilas.matIva, "E" + memFilas.matSubt + "*" + pV, materialVisibleIva);
+    mf(memFilas.totMat, "E" + memFilas.matSubt + "+E" + memFilas.matIva, materialVisibleTotalConIva);
+    mf(memFilas.moSubt, "'Cotización'!I" + sMo, manoObraVisibleTotal);
+    mf(memFilas.moAdmin, "E" + memFilas.moSubt + "*" + pA, t.moAdmin);
+    mf(memFilas.moImprev, "E" + memFilas.moSubt + "*" + pI, t.moImprev);
+    mf(memFilas.moUtil, "E" + memFilas.moSubt + "*" + pU, t.moUtil);
+    mf(memFilas.moIva, "E" + memFilas.moUtil + "*" + pV, t.moIva);
+    mf(memFilas.totMo, "SUM(E" + memFilas.moSubt + ":E" + memFilas.moIva + ")", t.totalMo);
+    mf(memFilas.totalSep, "E" + memFilas.totMat + "+E" + memFilas.totMo, t.totalSep);
+    mf(memFilas.anticipo, "E" + memFilas.totalSep + "*" + ((p.anticipo || 0) / 100), t.totalSep * (p.anticipo || 0) / 100);
+    mf(memFilas.avance, "E" + memFilas.totalSep + "*" + ((100 - (p.anticipo || 0)) / 100), t.totalSep * (100 - (p.anticipo || 0)) / 100);
+  } else {
+    mf(memFilas.subtotal, "'Cotización'!G" + sub, t.subtotal);
+    mf(memFilas.admin, "E" + memFilas.subtotal + "*" + pA, t.admin);
+    mf(memFilas.imprev, "E" + memFilas.subtotal + "*" + pI, t.imprev);
+    mf(memFilas.util, "E" + memFilas.subtotal + "*" + pU, t.util);
+    mf(memFilas.iva, "E" + memFilas.subtotal + "*" + pU + "*" + pV, t.iva);
+    mf(memFilas.total, "SUM(E" + memFilas.subtotal + ":E" + memFilas.iva + ")", t.total);
+    mf(memFilas.anticipo, "E" + memFilas.total + "*" + ((p.anticipo || 0) / 100), t.total * (p.anticipo || 0) / 100);
+    mf(memFilas.avance, "E" + memFilas.total + "*" + ((100 - (p.anticipo || 0)) / 100), t.total * (100 - (p.anticipo || 0)) / 100);
   }
 
   /* ===== 3. ANÁLISIS ===== */
