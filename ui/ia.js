@@ -387,3 +387,101 @@ function aplicarSugerenciaIA(p, apu, sugerencia, silencioso) {
   refrescarPanel(p);
   avisoOk("Sugerencia aplicada al APU " + apu);
 }
+
+function pedirOrganizarIA(p) {
+  var todos = itemsDe(p);
+  var sinApu = todos.filter(function (x) { return !x.f.apu; });
+  var apus = analisisDe(p);
+  var soloCA = apus.filter(function (a) {
+    return a.cod.length === 1 && a.cod[0] === "CA";
+  });
+  if (!sinApu.length && !soloCA.length) { avisoOk("Nada que organizar: todos los ítems tienen APU y apartados asignados"); return; }
+
+  var msg = "";
+  if (sinApu.length) msg += sinApu.length + " ítems sin APU";
+  if (soloCA.length) msg += (msg ? " y " : "") + soloCA.length + " análisis con solo Cableados por defecto";
+  if (!confirm("Se organizarán " + msg + ". ¿Continuar?")) return;
+
+  var ov = document.createElement("div");
+  ov.id = "iaoverlay";
+  ov.style.cssText = "position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center";
+  ov.innerHTML = '<div style="background:#fff;color:#222;max-width:420px;width:92%;border-radius:8px;padding:24px;box-shadow:0 8px 30px rgba(0,0,0,.3);text-align:center">' +
+    '<div style="font-size:32px;margin-bottom:12px">⏳</div>' +
+    '<div style="font-size:16px;font-weight:600" id="iaTitulo">Organizando con IA...</div>' +
+    '<div style="margin:8px 0;font-size:13px;color:#666" id="iaDetalle">' + esc(msg) + '</div>' +
+    '<div style="margin:12px auto;width:100%;height:6px;background:#e0e0e0;border-radius:3px;overflow:hidden">' +
+      '<div id="iaBarra" style="height:100%;width:15%;background:#2563eb;border-radius:3px;transition:width .3s"></div></div>' +
+    '</div>';
+  document.body.appendChild(ov);
+
+  var body = { modo: "organizar" };
+  if (sinApu.length) {
+    body.items = sinApu.map(function (x) { return { desc: x.f.desc, und: x.f.und, cant: x.f.cant }; });
+  }
+  if (soloCA.length) {
+    body.apusExistentes = soloCA.map(function (a) {
+      return { apu: a.apu, desc: a.items[0] ? a.items[0].desc : "", cod: a.cod };
+    });
+  }
+
+  postIA(body).then(function (j) {
+    var res = j.sugerencia;
+    if (!res) throw new Error("respuesta sin sugerencia");
+
+    var barra = document.getElementById("iaBarra");
+    if (barra) barra.style.width = "60%";
+
+    var nGrupos = 0, nReclas = 0;
+
+    if (Array.isArray(res.grupos) && sinApu.length) {
+      res.grupos.forEach(function (g) {
+        if (!Array.isArray(g.indices) || !g.indices.length) return;
+        if (!Array.isArray(g.cod) || !g.cod.length) g.cod = ["CA"];
+        var apuNum = siguienteApu(p);
+        g.indices.forEach(function (idx) {
+          if (idx < 0 || idx >= sinApu.length) return;
+          var item = sinApu[idx];
+          item.f.apu = apuNum;
+          item.f.cod = g.cod.slice();
+        });
+        nGrupos++;
+      });
+    }
+
+    if (Array.isArray(res.reclasificar)) {
+      res.reclasificar.forEach(function (r) {
+        if (!r.apu || !Array.isArray(r.cod) || !r.cod.length) return;
+        todos.forEach(function (x) {
+          if (x.f.apu === r.apu) x.f.cod = r.cod.slice();
+        });
+        nReclas++;
+      });
+    }
+
+    Store.guardar(p);
+
+    if (barra) barra.style.width = "100%";
+    var spin = ov.querySelector("[style*='font-size:32px']");
+    if (spin) spin.textContent = "✅";
+    var tit = document.getElementById("iaTitulo");
+    if (tit) tit.textContent = "Organización completada";
+    var det = document.getElementById("iaDetalle");
+    if (det) det.innerHTML = nGrupos + " grupos creados, " + nReclas + " análisis reclasificados" +
+      '<br><button class="btn btnp" id="iaCerrarOrg" style="margin-top:12px">Cerrar</button>';
+    var cerrar = document.getElementById("iaCerrarOrg");
+    if (cerrar) cerrar.onclick = function () {
+      if (ov.parentNode) ov.parentNode.removeChild(ov);
+      render();
+    };
+  }).catch(function (e) {
+    var spin = ov.querySelector("[style*='font-size:32px']");
+    if (spin) spin.textContent = "❌";
+    var tit = document.getElementById("iaTitulo");
+    if (tit) tit.textContent = "Error";
+    var det = document.getElementById("iaDetalle");
+    if (det) det.innerHTML = esc(e && e.message ? e.message : String(e)) +
+      '<br><button class="btn" id="iaCerrarOrg" style="margin-top:12px">Cerrar</button>';
+    var cerrar = document.getElementById("iaCerrarOrg");
+    if (cerrar) cerrar.onclick = function () { if (ov.parentNode) ov.parentNode.removeChild(ov); };
+  });
+}

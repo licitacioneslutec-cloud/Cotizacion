@@ -53,6 +53,38 @@ mo (Mano de obra). opciones.mo.items (planos)
 # Ejemplo (ítem individual)
 {"TU":[{"material":"PVC","tipo":"ENTERRADA","diam":"3/4\\"","cantidad":1}],"EQ":[{"familia":"...","subfamilia":"...","cantidad":1}],"CA":[{"fase":"...","cantFase":3,"neutro":"...","cantNeutro":1,"tierra":"...","cantTierra":1,"metrado":0,"repite":0,"bornas":true}],"razonamiento":"Acometida trifásica en PVC enterrada con cables..."}`;
 
+const SYSTEM_PROMPT_ORGANIZAR = `Eres un experto en instalaciones eléctricas y presupuestos de obra en Colombia.
+
+TAREA: Organizar ítems de un presupuesto eléctrico en dos pasos.
+
+1. AGRUPAR: Los ítems del array "items" NO tienen APU asignado. Agrupa los que describen el mismo trabajo o actividad. Ítems con descripciones iguales o muy similares van en el mismo grupo. Ítems diferentes van en grupos separados. Cada grupo se convertirá en un APU nuevo.
+
+2. CLASIFICAR: Para cada grupo nuevo Y para cada APU en "apusExistentes" que tenga solo ["CA"] por defecto, determina los apartados correctos según la descripción:
+   - CA (Cableados): cable, conductor, alimentador, acometida de cables
+   - TU (Tuberías): tubería, ducto, conduit, canaleta, bandeja portacables
+   - TA (Tableros): tablero, gabinete, panel de distribución, barraje, breaker, protecciones
+   - EQ (Equipos): transformador, UPS, luminaria, reflector, sensor, variador, contactor
+   - SA (Salidas): toma, punto eléctrico, interruptor de luz, iluminación, datos, punto de red
+   - mo (Módulos): montaje, instalación, pruebas, certificación, mano de obra general
+
+Un ítem puede pertenecer a varios apartados. Ejemplo: "Acometida en EMT 3/4 con cable 3x12" → ["TU","CA"]
+
+IMPORTANTE: Responde ÚNICAMENTE con JSON válido. Sin texto antes ni después.
+
+{
+  "grupos": [
+    {"indices": [0, 3], "cod": ["TU", "CA"], "razon": "Tubería EMT con cableado"}
+  ],
+  "reclasificar": [
+    {"apu": 5, "cod": ["TU"], "razon": "Solo tubería"}
+  ]
+}
+
+- "indices": posiciones base 0 del array "items" del input que van juntas en un APU.
+- "cod": array de IDs de apartados para ese grupo.
+- "reclasificar": solo para APUs de "apusExistentes" que necesiten cambio de clasificación. Si un APU ya tiene la clasificación correcta, no lo incluyas.
+- Cada ítem de "items" debe aparecer en exactamente un grupo.`;
+
 exports.handler = async function (event) {
   if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: corsHeaders, body: "" };
   if (event.httpMethod !== "POST") return reply(405, { error: "Método no permitido" });
@@ -78,8 +110,8 @@ exports.handler = async function (event) {
       },
       body: JSON.stringify({
         model: "claude-haiku-5-5",
-        max_tokens: 2048,
-        system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
+        max_tokens: body.modo === "organizar" ? 4096 : 2048,
+        system: [{ type: "text", text: body.modo === "organizar" ? SYSTEM_PROMPT_ORGANIZAR : SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
         messages: [{ role: "user", content: JSON.stringify(body) }],
       }),
     });
