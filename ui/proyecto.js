@@ -1224,7 +1224,8 @@ function vArmado(p, r) {
       '</tr></thead><tbody>' + cuerpo + '</tbody></table></div>' + barra +
       '<div class="btnrow" style="margin:12px 0"><button class="btn" id="agregarItem">+ Agregar ítem</button>' +
         '<button class="btn" id="agregarCap" style="margin-left:8px">+ Agregar capítulo</button>' +
-        '<button class="btn" id="agruparIguales" style="margin-left:8px">Agrupar iguales</button></div>' +
+        '<button class="btn" id="agruparIguales" style="margin-left:8px">Agrupar iguales</button>' +
+        '<button class="btn" id="btnOrganizarIA" style="margin-left:8px">Organizar con IA</button></div>' +
     '</div>' +
     '<div class="note"><div class="notet">Cómo se usa</div>' +
     '<div class="noteb">Escribe el mismo número de análisis en dos ítems para unirlos, o usa la selección ' +
@@ -1241,6 +1242,8 @@ function enlazarArmado(p) {
   if (thvu) thvu.onclick = function () {
     ir({ ordenArmado: vista.ordenArmado === "unitDesc" ? "unitAsc" : vista.ordenArmado === "unitAsc" ? null : "unitDesc" });
   };
+  var btnOrg = document.getElementById("btnOrganizarIA");
+  if (btnOrg) btnOrg.onclick = function () { pedirOrganizarIA(p); };
   var ff = document.getElementById("filtroarmado");
   if (ff) ff.oninput = function () {
     vista.filtroArmado = this.value;

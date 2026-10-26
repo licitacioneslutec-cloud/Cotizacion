@@ -85,8 +85,7 @@ function vApartados(p) {
         esc(vista.filtroApu || '') + '"></div>' +
       '<div style="padding:0 10px 8px"><input class="in" id="filtroinsumo" placeholder="Buscar por código de insumo" value="' +
         esc(vista.filtroApuInsumo || '') + '"></div>' +
-      '<div style="padding:0 10px 8px;display:flex;gap:4px"><button class="btn" id="btnOrganizarIA" style="font-size:11px;flex:1">Organizar con IA</button>' +
-      '<button class="btn" id="btnIALote" style="font-size:11px;flex:1">Sugerir todos con IA</button>' +
+      '<div style="padding:0 10px 8px;display:flex;gap:4px"><button class="btn" id="btnIALote" style="font-size:11px;flex:1">Sugerir todos con IA</button>' +
       '<button class="btn" id="btnLimpiarCache" style="font-size:10px;padding:2px 6px;color:var(--ink3)" title="Borrar caché de sugerencias IA">🗑</button></div>' +
       '<div class="alist" id="listaapu">' + listaApu(p, listaFiltrada, act) + '</div></div>' +
       '<div id="panelapu">' + panelApu(p, cat, act) + '</div>' +
@@ -1229,8 +1228,6 @@ function enlazarPanel(p) {
 function enlazarApartados(p) {
   var ic = document.getElementById("ircat");
   if (ic) { ic.onclick = function () { ir({ pantalla: "catalogo" }); }; return; }
-  var btnOrg = document.getElementById("btnOrganizarIA");
-  if (btnOrg) btnOrg.onclick = function () { pedirOrganizarIA(p); };
   enlazarLista(p);
   enlazarPanel(p);
 }
