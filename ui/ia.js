@@ -427,7 +427,7 @@ function pedirOrganizarIA(p) {
   });
 
   /* ponytail: dos descripciones parecidas en lotes distintos no se agrupan; "Agrupar iguales" y la edición manual lo cubren */
-  var TAM_LOTE = 40, lotes = [], li;
+  var TAM_LOTE = 25, lotes = [], li;
   for (li = 0; li < unicos.length; li += TAM_LOTE) lotes.push({ unicos: unicos.slice(li, li + TAM_LOTE), apus: [] });
   for (li = 0; li < porClasificar.length; li += TAM_LOTE) lotes.push({ unicos: [], apus: porClasificar.slice(li, li + TAM_LOTE) });
 

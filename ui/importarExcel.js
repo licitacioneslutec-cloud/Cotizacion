@@ -71,8 +71,9 @@ function leerAnalisisXl(ws) {
     if (sec === "th") {
       var pct = numXl(celdaXl(ws, r, 4));
       var codTh = a.toUpperCase();
-      if (codTh === "TR1") act.pctT = pct === null ? 0 : pct * 100;
-      if (codTh === "HER1") act.pctH = pct === null ? 0 : pct * 100;
+      var pctLimpio = pct === null ? 0 : Math.round(pct * 1e8) / 1e6;
+      if (codTh === "TR1") act.pctT = pctLimpio;
+      if (codTh === "HER1") act.pctH = pctLimpio;
       continue;
     }
     if (!sec) continue;
@@ -111,7 +112,7 @@ function leerCotizacionXl(ws) {
     var c = textoXl(celdaXl(ws, r, 2)), d = textoXl(celdaXl(ws, r, 3));
     var cant = numXl(celdaXl(ws, r, 4));
     if (!a && !b && !c) continue;
-    if (cant !== null && (c || d)) {
+    if (cant !== null) {
       var celU = celdaXl(ws, r, 5), celT = celdaXl(ws, r, 6), celMo = sep ? celdaXl(ws, r, 7) : null;
       asegurar().filas.push({
         tipo: "it", apu: Number(a) || null, item: b, desc: c, und: d, cant: cant,
@@ -214,15 +215,20 @@ function proyectoDesdeExcel(xl) {
 function sincronizarItems(p, xl, cambios) {
   var existentes = itemsDe(p);
   var usados = [];
+  var exactos = {}, parecidos = {};
+  var anotar = function (mapa, k, i) { (mapa[k] || (mapa[k] = [])).push(i); };
+  existentes.forEach(function (x, i) {
+    anotar(exactos, (x.f.item || "") + "|" + (x.f.desc || ""), i);
+    anotar(parecidos, norm(x.f.desc), i);
+  });
+  var libre = function (lista) {
+    return (lista || []).filter(function (i) { return !usados[i]; })[0];
+  };
   var buscar = function (it) {
-    var clave = (it.item || "") + "|" + (it.desc || "");
-    var exacto = null, parecido = null;
-    existentes.forEach(function (x, i) {
-      if (usados[i]) return;
-      if (!exacto && (x.f.item || "") + "|" + (x.f.desc || "") === clave) exacto = i;
-      if (parecido === null && norm(x.f.desc) === norm(it.desc)) parecido = i;
-    });
-    return exacto !== null ? exacto : parecido;
+    var exacto = libre(exactos[(it.item || "") + "|" + (it.desc || "")]);
+    if (exacto !== undefined) return exacto;
+    var parecido = libre(parecidos[norm(it.desc)]);
+    return parecido !== undefined ? parecido : null;
   };
   xl.hojas.forEach(function (hx) {
     hx.filas.forEach(function (it) {
@@ -286,7 +292,7 @@ function sincronizarLineas(p, cat, n, ax, cambios, avisos, esNuevo) {
       cod = (l.mo ? "LTCEXC-" : "EXC-") + n + "-" + sinCodigo;
     }
     var real = realDe[codClave(cod)] || cod;
-    if (!insumoDe(cat, real, p)) {
+    if (base[real] === undefined && !insumoDe(cat, real, p)) {
       asegurarPropio(p, real, l);
       if (l.mo && !esManoObra(real)) {
         avisos.push("Análisis " + n + ": el código " + real + " está en Mano de obra, pero la app lo contará como material.");
@@ -361,7 +367,7 @@ function fijarCostoCopia(p, it, costo) {
   /* registrarPropio vuelve a escribir este precio desde la fila del equipo al componer */
   Object.keys(p.datosApu || {}).forEach(function (k) {
     ((p.datosApu[k] || {}).EQ || []).forEach(function (fila) {
-      if (fila.crearItem && fila.codItem === it.cod) fila.precio = costo;
+      if (fila.crearItem && codClave(fila.codItem) === it.cod) fila.precio = costo;
     });
   });
 }
@@ -488,7 +494,8 @@ function planImportacion(xl, base, cat, elecciones) {
   var noCuadran = [];
   ordenApus.forEach(function (n) {
     var enApp = t.porApu[n] ? t.porApu[n].unitario : null;
-    var enExcel = xl.apus[n].directo;
+    var manual = valorManualApu(xl, n, xl.apus[n], []);
+    var enExcel = manual !== null ? manual : xl.apus[n].directo;
     if (enApp !== null && enExcel !== null && Math.abs(enApp - enExcel) > 1) {
       noCuadran.push({ apu: n, app: enApp, excel: enExcel });
     }
@@ -502,10 +509,15 @@ function planImportacion(xl, base, cat, elecciones) {
 /* ---------------------------- Interfaz ----------------------------- */
 
 function htmlPlanImportacion(plan, xl, destino) {
+  var repetidos = {};
+  Store.todos().forEach(function (x) { repetidos[norm(x.nombre)] = (repetidos[norm(x.nombre)] || 0) + 1; });
   var opciones = '<option value="nuevo"' + (destino === "nuevo" ? " selected" : "") + '>Crear proyecto nuevo</option>' +
     Store.todos().map(function (x) {
-      return '<option value="' + esc(x.id) + '"' + (x.id === destino ? " selected" : "") + '>' + esc(x.nombre) + '</option>';
+      var detalle = repetidos[norm(x.nombre)] > 1
+        ? " · " + (x.cliente || "sin cliente") + " · modificado " + String(x.modificado || "").slice(0, 10) : "";
+      return '<option value="' + esc(x.id) + '"' + (x.id === destino ? " selected" : "") + '>' + esc(x.nombre + detalle) + '</option>';
     }).join("");
+  var nombreRepetido = repetidos[norm(xl.mem.nombre)] > 1;
 
   var conflictos = plan.conflictos.map(function (c) {
     return '<div style="display:flex;gap:8px;align-items:center;margin:4px 0;flex-wrap:wrap">' +
@@ -547,6 +559,7 @@ function htmlPlanImportacion(plan, xl, destino) {
     '<div style="font-size:12px;color:#666;margin-bottom:10px">Proyecto en el Excel: ' + esc(xl.mem.nombre || "sin nombre") + '</div>' +
     '<label class="lbl" for="impdestino">Cargar en</label>' +
     '<select class="in" id="impdestino">' + opciones + '</select>' +
+    (nombreRepetido ? '<div style="font-size:12px;color:#a15c00;margin-top:6px">Hay varios proyectos con este nombre. Revisa que el elegido sea el correcto.</div>' : '') +
     (plan.esNuevo ? '<div style="font-size:12px;color:#666;margin-top:6px">Los análisis se crean como listas de insumos, sin Tubería, Cableado ni los demás apartados, porque el Excel no los guarda.</div>' : '') +
     (conflictos ? '<div style="margin-top:12px"><b style="font-size:13px">Elige un precio para cada insumo con varios precios</b>' + conflictos + '</div>' : '') +
     conciliacion +

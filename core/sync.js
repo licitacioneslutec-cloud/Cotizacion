@@ -12,8 +12,9 @@
    ponytail: sin marcas de borrado, un guardado borrado en un equipo puede volver desde otro; agregarlas si ocurre. */
 function mezclarPlantillas(local, nube) {
   var porId = {}, localMasNuevo = false;
-  nube.forEach(function (x) { porId[x.id] = x; });
+  nube.forEach(function (x) { if (x) porId[x.id] = x; });
   local.forEach(function (x) {
+    if (!x) return;
     var n = porId[x.id];
     if (!n) { porId[x.id] = x; return; }
     if ((x.fecha || "") > (n.fecha || "")) { porId[x.id] = x; localMasNuevo = true; }
