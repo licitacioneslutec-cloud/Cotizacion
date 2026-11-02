@@ -7,6 +7,22 @@
      a través de una carpeta compartida (Drive, OneDrive, etc).
    - Nunca bloquea: si la nube falla, se sigue con lo local.
    ================================================================== */
+
+/* Por id gana la fecha más reciente; lo que solo existe en un lado se conserva.
+   ponytail: sin marcas de borrado, un guardado borrado en un equipo puede volver desde otro; agregarlas si ocurre. */
+function mezclarPlantillas(local, nube) {
+  var porId = {}, localMasNuevo = false;
+  nube.forEach(function (x) { porId[x.id] = x; });
+  local.forEach(function (x) {
+    var n = porId[x.id];
+    if (!n) { porId[x.id] = x; return; }
+    if ((x.fecha || "") > (n.fecha || "")) { porId[x.id] = x; localMasNuevo = true; }
+  });
+  var lista = Object.keys(porId).map(function (k) { return porId[k]; });
+  lista.sort(function (a, b) { return (b.fecha || "").localeCompare(a.fecha || ""); });
+  return { lista: lista, localMasNuevo: localMasNuevo };
+}
+
 var Sync = {
   timerCat: null, _timerPolling: null, ocupado: false,
 
@@ -113,8 +129,9 @@ var Sync = {
 
       /* ---- Plantillas ---- */
       if (plan && plan.length) {
-        var lp = Plantillas.leer();
-        if (plan.length >= lp.length) Plantillas.guardar(plan);
+        var mezcla = mezclarPlantillas(Plantillas.leer(), plan);
+        Plantillas.guardar(mezcla.lista);
+        if (mezcla.localMasNuevo) Sync.subirPlantillas();
       } else if (Plantillas.leer().length) {
         Sync.subirPlantillas();
       }

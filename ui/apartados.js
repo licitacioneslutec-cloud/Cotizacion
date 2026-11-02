@@ -597,22 +597,49 @@ function panelApu(p, cat, act) {
       '</div>' +
       (vista.verPlan
         ? (Plantillas.leer().length
-          ? '<div class="planlista">' + Plantillas.leer().map(function (pl) {
-              var partes = [];
-              ["CA", "TU", "TA", "EQ", "SA", "mo"].forEach(function (k) {
-                if (pl.datos[k] && pl.datos[k].length) partes.push(k + " " + pl.datos[k].length);
-              });
-              return '<div class="planitem"><div><div class="plann">' + esc(pl.nombre) + '</div>' +
-                '<div class="planm m">' + partes.join(" · ") + ' · ' + fecha(pl.fecha.slice(0, 10)) + '</div></div>' +
-                '<div class="btnrow">' +
-                  '<button class="btn btnmini" data-usaplan="' + pl.id + '">Usar</button>' +
-                  '<button class="btnx btnxdel" data-quitaplan="' + pl.id + '">Borrar</button>' +
-                '</div></div>';
-            }).join("") + '</div>'
+          ? listaPlantillasPorCategoria()
           : '<p style="margin:0;font-size:13px;color:var(--ink2)">Todavía no hay ninguno guardado. ' +
             'Arma un análisis y pulsa Guardar este armado para reutilizarlo después.</p>')
         : "") +
     '</div></div>';
+}
+
+function itemPlantilla(pl) {
+  var partes = [];
+  ["CA", "TU", "TA", "EQ", "SA", "mo"].forEach(function (k) {
+    if (pl.datos[k] && pl.datos[k].length) partes.push(k + " " + pl.datos[k].length);
+  });
+  return '<div class="planitem"><div><div class="plann">' + esc(pl.nombre) + '</div>' +
+    '<div class="planm m">' + partes.join(" · ") + ' · ' + fecha(pl.fecha.slice(0, 10)) + '</div></div>' +
+    '<div class="btnrow">' +
+      '<button class="btn btnmini" data-usaplan="' + esc(pl.id) + '">Usar</button>' +
+      '<button class="btnx btnxdel" data-quitaplan="' + esc(pl.id) + '">Borrar</button>' +
+    '</div></div>';
+}
+
+/* Un guardado con varias categorías aparece en cada una */
+function listaPlantillasPorCategoria() {
+  var filtro = vista.filtroPlanCat || "";
+  var todas = Plantillas.leer();
+  var filtros = '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px">' +
+    APARTADOS.map(function (ap) {
+      return '<button class="tog" data-filtroplan="' + ap.id + '" aria-pressed="' + (filtro === ap.id) +
+        '" title="' + ap.nombre + '">' + ap.id + '</button>';
+    }).join("") +
+    (filtro ? '<button class="btnx" data-filtroplan="" style="font-size:11px;color:var(--ink3);margin-left:4px" title="Quitar filtro">Todos</button>' : '') +
+    '</div>';
+  var grupos = APARTADOS.filter(function (ap) { return !filtro || filtro === ap.id; }).map(function (ap) {
+    var deEsta = todas.filter(function (pl) { return catsDePlan(pl).indexOf(ap.id) >= 0; });
+    if (!deEsta.length) return "";
+    return '<div class="lbl" style="margin:10px 0 4px">' + ap.nombre + ' · ' + deEsta.length + '</div>' +
+      '<div class="planlista">' + deEsta.map(itemPlantilla).join("") + '</div>';
+  }).join("");
+  if (!filtro) {
+    var sinCat = todas.filter(function (pl) { return !catsDePlan(pl).length; });
+    if (sinCat.length) grupos += '<div class="lbl" style="margin:10px 0 4px">Sin categoría · ' + sinCat.length + '</div>' +
+      '<div class="planlista">' + sinCat.map(itemPlantilla).join("") + '</div>';
+  }
+  return filtros + (grupos || '<p style="margin:0;font-size:13px;color:var(--ink2)">No hay guardados en esta categoría.</p>');
 }
 
 /* Redibuja solo el panel derecho: así el resto de la página no se destruye
@@ -1177,10 +1204,22 @@ function enlazarPanel(p) {
     if (!tiene) { avisoError("Este análisis todavía no tiene nada armado."); return; }
     var n = prompt("¿Con qué nombre lo guardas?", act.items[0] ? act.items[0].desc.slice(0, 60) : "Análisis " + act.apu);
     if (!n) return;
-    if (Plantillas.agregar(n, d)) { avisoOk("Guardado. Ya lo puedes usar en cualquier proyecto."); refrescarPanel(p); }
+    var previo = Plantillas.porNombre(n);
+    if (previo && !confirm('Ya hay un análisis guardado llamado "' + previo.nombre + '". ¿Reemplazarlo?')) return;
+    if (Plantillas.agregar(n, d, act.cod, previo ? previo.id : null)) {
+      avisoOk(previo ? "Guardado actualizado." : "Guardado. Ya lo puedes usar en cualquier proyecto.");
+      refrescarPanel(p);
+    }
   };
   var vp = document.getElementById("verplan");
   if (vp) vp.onclick = function () { vista.verPlan = !vista.verPlan; refrescarPanel(p); };
+  Array.prototype.forEach.call(document.querySelectorAll("[data-filtroplan]"), function (b) {
+    b.onclick = function () {
+      var v = b.dataset.filtroplan;
+      vista.filtroPlanCat = vista.filtroPlanCat === v ? "" : v;
+      refrescarPanel(p);
+    };
+  });
   Array.prototype.forEach.call(document.querySelectorAll("[data-usaplan]"), function (b) {
     b.onclick = function () {
       var pl = null;

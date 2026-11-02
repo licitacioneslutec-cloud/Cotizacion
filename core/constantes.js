@@ -152,19 +152,38 @@ var Plantillas = {
     IDB.escribir("plantillas", lista);
     return true;
   },
-  agregar: function (nombre, datos) {
+  porNombre: function (nombre) {
+    var k = txt(nombre).toLowerCase();
+    return Plantillas.leer().filter(function (x) { return txt(x.nombre).toLowerCase() === k; })[0] || null;
+  },
+  /* Con reemplazaId actualiza ese guardado en su lugar; sin él, agrega uno nuevo */
+  agregar: function (nombre, datos, cats, reemplazaId) {
     var l = Plantillas.leer();
-    var copia = JSON.parse(JSON.stringify(datos));
-    delete copia.ajustes;
-    l.unshift({ id: id(), nombre: nombre, fecha: new Date().toISOString(), datos: copia });
+    var entrada = {
+      id: reemplazaId || id(), nombre: nombre, fecha: new Date().toISOString(),
+      cats: (cats || []).slice(), datos: JSON.parse(JSON.stringify(datos))
+    };
+    var pos = -1;
+    l.forEach(function (x, i) { if (x.id === reemplazaId) pos = i; });
+    if (pos >= 0) l[pos] = entrada; else l.unshift(entrada);
     var ok = Plantillas.guardar(l);
     Sync.subirPlantillas();
     return ok;
   },
   quitar: function (pid) {
-    return Plantillas.guardar(Plantillas.leer().filter(function (x) { return x.id !== pid; }));
+    var ok = Plantillas.guardar(Plantillas.leer().filter(function (x) { return x.id !== pid; }));
+    Sync.subirPlantillas();
+    return ok;
   }
 };
+
+/* Categorías de un guardado; los anteriores a este campo las derivan de lo que tienen armado */
+function catsDePlan(pl) {
+  var ids = APARTADOS.map(function (a) { return a.id; });
+  var guardadas = (Array.isArray(pl.cats) ? pl.cats : []).filter(function (c) { return ids.indexOf(c) >= 0; });
+  if (guardadas.length) return guardadas;
+  return ids.filter(function (c) { return pl.datos && pl.datos[c] && pl.datos[c].length; });
+}
 
 /* Roles de columna que buscamos en un archivo de precios de proveedor */
 /* Columnas de una lista de proveedor con ofertas por marca */
