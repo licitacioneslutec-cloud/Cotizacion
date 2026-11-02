@@ -55,35 +55,55 @@ mo (Mano de obra). opciones.mo.items (planos)
 
 const SYSTEM_PROMPT_ORGANIZAR = `Eres un experto en instalaciones eléctricas y presupuestos de obra en Colombia.
 
-TAREA: Organizar ítems de un presupuesto eléctrico en dos pasos.
+TAREA: Organizar ítems de un presupuesto eléctrico.
 
-1. AGRUPAR: Los ítems del array "items" NO tienen APU asignado. Agrupa los que describen el mismo trabajo o actividad. Ítems con descripciones iguales o muy similares van en el mismo grupo. Ítems diferentes van en grupos separados. Cada grupo se convertirá en un APU nuevo.
+1. AGRUPAR: Los ítems de "items" no tienen APU. Cada grupo será un APU nuevo con un solo precio unitario, así que solo agrupa ítems que sean la misma actividad con las mismas especificaciones. Si cambia el diámetro, calibre, capacidad, material o tipo, van en grupos distintos. Ante la duda, sepáralos.
 
-2. CLASIFICAR: Para cada grupo nuevo Y para cada APU en "apusExistentes" que tenga solo ["CA"] por defecto, determina los apartados correctos según la descripción:
-   - CA (Cableados): cable, conductor, alimentador, acometida de cables
-   - TU (Tuberías): tubería, ducto, conduit, canaleta, bandeja portacables
-   - TA (Tableros): tablero, gabinete, panel de distribución, barraje, breaker, protecciones
-   - EQ (Equipos): transformador, UPS, luminaria, reflector, sensor, variador, contactor
-   - SA (Salidas): toma, punto eléctrico, interruptor de luz, iluminación, datos, punto de red
-   - mo (Módulos): montaje, instalación, pruebas, certificación, mano de obra general
+2. CLASIFICAR: Para cada grupo nuevo y cada APU de "apusExistentes", determina sus apartados según la descripción:
+   - CA (Cableados): cable, conductor, alimentador, circuito, parte de cable de una acometida
+   - TU (Tuberías): tubería, canalización, ducto, conduit, parte de tubo de una acometida
+   - TA (Tableros): tablero, gabinete, panel de distribución, barraje, cofre
+   - EQ (Equipos): interruptor, breaker, totalizador, contactor, relé, UPS, planta, luminaria, reflector, sensor, variador, transformador, celda, TGA
+   - SA (Salidas): salida, punto eléctrico, toma, interruptor de luz, punto de iluminación o datos
+   - mo (Módulos): instalación, montaje, conexión, pruebas, certificación, canaleta, bandeja portacables
 
-Un ítem puede pertenecer a varios apartados. Ejemplo: "Acometida en EMT 3/4 con cable 3x12" → ["TU","CA"]
+Un ítem puede tener varios apartados. Ejemplo: "Acometida en EMT 3/4 con cable 3x12" → ["TU","CA"]
 
-IMPORTANTE: Responde ÚNICAMENTE con JSON válido. Sin texto antes ni después.
+- "grupos[].indices": posiciones base 0 de "items". Cada ítem de "items" debe aparecer en exactamente un grupo. Si "items" no viene, "grupos" va vacío.
+- "reclasificar": incluye todo APU de "apusExistentes" con "cod" vacío y los que tengan una clasificación incorrecta. Si la clasificación ya es correcta, no lo incluyas.`;
 
-{
-  "grupos": [
-    {"indices": [0, 3], "cod": ["TU", "CA"], "razon": "Tubería EMT con cableado"}
-  ],
-  "reclasificar": [
-    {"apu": 5, "cod": ["TU"], "razon": "Solo tubería"}
-  ]
-}
-
-- "indices": posiciones base 0 del array "items" del input que van juntas en un APU.
-- "cod": array de IDs de apartados para ese grupo.
-- "reclasificar": solo para APUs de "apusExistentes" que necesiten cambio de clasificación. Si un APU ya tiene la clasificación correcta, no lo incluyas.
-- Cada ítem de "items" debe aparecer en exactamente un grupo.`;
+const APARTADOS_ID = ["CA", "TU", "TA", "EQ", "SA", "mo"];
+const ESQUEMA_ORGANIZAR = {
+  type: "object",
+  additionalProperties: false,
+  required: ["grupos", "reclasificar"],
+  properties: {
+    grupos: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["indices", "cod"],
+        properties: {
+          indices: { type: "array", items: { type: "integer" } },
+          cod: { type: "array", items: { type: "string", enum: APARTADOS_ID } },
+        },
+      },
+    },
+    reclasificar: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["apu", "cod"],
+        properties: {
+          apu: { type: "integer" },
+          cod: { type: "array", items: { type: "string", enum: APARTADOS_ID } },
+        },
+      },
+    },
+  },
+};
 
 exports.handler = async function (event) {
   if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: corsHeaders, body: "" };
@@ -99,6 +119,8 @@ exports.handler = async function (event) {
     return reply(400, { error: "Cuerpo JSON inválido" });
   }
 
+  const organizar = body.modo === "organizar";
+
   let res, data;
   try {
     res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -110,9 +132,10 @@ exports.handler = async function (event) {
       },
       body: JSON.stringify({
         model: "claude-haiku-5-5",
-        max_tokens: body.modo === "organizar" ? 4096 : 2048,
-        system: [{ type: "text", text: body.modo === "organizar" ? SYSTEM_PROMPT_ORGANIZAR : SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
+        max_tokens: organizar ? 16000 : 2048,
+        system: [{ type: "text", text: organizar ? SYSTEM_PROMPT_ORGANIZAR : SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
         messages: [{ role: "user", content: JSON.stringify(body) }],
+        ...(organizar ? { output_config: { effort: "low", format: { type: "json_schema", schema: ESQUEMA_ORGANIZAR } } } : {}),
       }),
     });
     data = await res.json();
@@ -121,6 +144,13 @@ exports.handler = async function (event) {
   }
 
   if (!res.ok) return reply(res.status, { error: data.error || data });
+
+  if (organizar && data.stop_reason === "max_tokens") {
+    return reply(200, { error: "La respuesta de la IA quedó cortada por ser demasiado larga", usage: data.usage });
+  }
+  if (organizar && data.stop_reason === "refusal") {
+    return reply(200, { error: "La IA rechazó esta solicitud", usage: data.usage });
+  }
 
   const textBlock = (data.content || []).find(b => b.type === "text");
   let text = (textBlock && textBlock.text) || "";

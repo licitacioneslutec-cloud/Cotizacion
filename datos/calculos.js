@@ -202,7 +202,10 @@ function totales(p) {
 }
 function siguienteApu(p) {
   var max = 0;
-  itemsDe(p).forEach(function (x) { if (x.f.apu && x.f.apu > max) max = x.f.apu; });
+  (p.hojas || []).forEach(function (h) {
+    (h.filas || []).forEach(function (f) { if (Number(f.apu) > max) max = Number(f.apu); });
+  });
+  Object.keys(p.datosApu || {}).forEach(function (k) { if (Number(k) > max) max = Number(k); });
   return max + 1;
 }
 
