@@ -651,8 +651,8 @@ function exportarTodo(p) {
   i4.addRow(["Código", "Descripción", "Und", "Cantidad", "Desp.", "Precio costo", "Vr. venta", "Vale", "Análisis"]).eachCell(thd);
   var ri = 2;
   insumosDe(p, cat).forEach(function (i) {
-    var venta = precioAjustado({ precio: i.precio, imp: i.imp, ofertas: i.ofertas, sel: i.sel, cod: i.cod }, mg, p);
-    var costo = costoDe({ precio: i.precio, ofertas: i.ofertas, sel: i.sel, cod: i.cod }, p);
+    var venta = precioAjustado({ precio: i.precio, imp: i.imp, rent: i.rent, propio: i.propio, ofertas: i.ofertas, sel: i.sel, cod: i.cod }, mg, p);
+    var costo = costoDe({ precio: i.precio, propio: i.propio, ofertas: i.ofertas, sel: i.sel, cod: i.cod }, p);
     var valeCell = costo > 0 ? { formula: "G" + ri + "*D" + ri, result: venta * i.cantidad } : null;
     var r = i4.addRow([i.cod, i.desc, i.und, i.cantidad, i.desp ? i.desp / 100 : null,
                        costo || null, venta || null, valeCell, i.apus.join(", ")]);

@@ -143,6 +143,7 @@ function renderProyectos() {
         (Sync.encendida() ? '<button class="btn" id="synccatalogo">Sincronizar catálogo</button>' : '') +
         '<button class="btn" id="exportall">Respaldo completo</button>' +
         '<button class="btn" id="importar">Restaurar</button>' +
+        '<button class="btn" id="importarExcel">Importar Excel editado</button>' +
         '<button class="btn btnp" id="nuevo">Nuevo proyecto</button>' +
       '</div>' +
     '</div></header>' +
@@ -194,6 +195,7 @@ function renderProyectos() {
     a.click(); URL.revokeObjectURL(a.href);
   };
 
+  document.getElementById("importarExcel").onclick = abrirImportarExcel;
   document.getElementById("importar").onclick = function () { document.getElementById("fimport").click(); };
   document.getElementById("fimport").onchange = function (e) {
     var f = e.target.files[0]; if (!f) return;
