@@ -11,7 +11,7 @@ var IDB = {
   abrir: function () {
     if (IDB._db) return Promise.resolve(IDB._db);
     return new Promise(function (resolve, reject) {
-      var req = indexedDB.open("apu-db", 2);
+      var req = indexedDB.open("apu-db", 3);
       req.onupgradeneeded = function (e) {
         var db = e.target.result;
         if (!db.objectStoreNames.contains("proyectos"))  db.createObjectStore("proyectos", { keyPath: "id" });
