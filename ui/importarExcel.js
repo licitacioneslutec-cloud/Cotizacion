@@ -87,7 +87,8 @@ function leerAnalisisXl(ws) {
       if (Math.abs(g - esperado) > TOL_VALOR) precio = g / (cant * (1 + desp));
     }
     act.lineas.push({
-      cod: codClave(a), desc: b, und: c, cant: cant, desp: desp * 100,
+      /* La columna H (oculta) trae el código propio; A puede mostrar el Auranet */
+      cod: codClave(textoXl(celdaXl(ws, r, 7)) || a), desc: b, und: c, cant: cant, desp: desp * 100,
       precio: precio, mo: sec === "mo"
     });
   }
@@ -281,6 +282,11 @@ function sincronizarLineas(p, cat, n, ax, cambios, avisos, esNuevo) {
   componerAnalisis(cat, sinAjustes, p, n).lineas.forEach(function (l) {
     base[l.cod] = l.cant;
     realDe[codClave(l.cod)] = l.cod;
+  });
+  /* Si alguien escribió a mano el código Auranet, también se reconoce (el propio manda) */
+  Object.keys(base).forEach(function (c) {
+    var it = insumoDe(cat, c, p), vis = it ? codClave(codVisible(it, p)) : "";
+    if (vis && realDe[vis] === undefined) realDe[vis] = c;
   });
 
   var objetivo = {}, orden = [], precios = [], sinCodigo = 0;

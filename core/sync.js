@@ -98,6 +98,33 @@ var Sync = {
     if (!Sync.encendida()) return;
     Nube.escribir("plantillas", Plantillas.leer()).catch(function () {});
   },
+  subirCajas: function () {
+    if (!Sync.encendida()) return;
+    Nube.escribir("cajas", Cajas.leer()).catch(function () { Sync.marca("err"); });
+  },
+  subirBolsa: function (id) {
+    if (!Sync.encendida()) return;
+    var b = Bolsas.leer(id);
+    if (b) Nube.escribir("bolsas/" + id, b).catch(function () { Sync.marca("err"); });
+  },
+  bajarBolsas: function () {
+    if (!Sync.encendida()) return Promise.resolve(false);
+    return Nube.leer("bolsas").then(function (data) {
+      if (!data) return false;
+      Object.keys(data).forEach(function (id) {
+        var nube = data[id]; if (!nube) return;
+        var local = Bolsas.leer(id);
+        if (!local || (nube.modificado || "") > (local.modificado || "")) {
+          nube.id = id;
+          var i = -1;
+          for (var k = 0; k < _cacheBolsas.length; k++) if (_cacheBolsas[k].id === id) { i = k; break; }
+          if (i >= 0) _cacheBolsas[i] = nube; else _cacheBolsas.push(nube);
+          IDB.guardarBolsa(nube);
+        }
+      });
+      return true;
+    }).catch(function () { return false; });
+  },
 
   /* Carga inicial: baja catálogo y plantillas de la nube. Los proyectos ya no viajan. */
   bajarTodo: function () {
@@ -105,9 +132,10 @@ var Sync = {
     Sync.marca("sync");
     return Promise.all([
       Nube.leer("catalogo").catch(function () { return "ERR"; }),
-      Nube.leer("plantillas").catch(function () { return "ERR"; })
+      Nube.leer("plantillas").catch(function () { return "ERR"; }),
+      Nube.leer("cajas").catch(function () { return "ERR"; })
     ]).then(function (r) {
-      var cat = r[0], plan = r[1];
+      var cat = r[0], plan = r[1], cajasNube = r[2];
       var fallo = (cat === "ERR");
       if (cat === "ERR") cat = undefined;
       if (plan === "ERR") plan = undefined;
@@ -135,6 +163,19 @@ var Sync = {
         if (mezcla.localMasNuevo) Sync.subirPlantillas();
       } else if (Plantillas.leer().length) {
         Sync.subirPlantillas();
+      }
+
+      /* ---- Cajas personalizadas ---- */
+      if (cajasNube !== "ERR" && cajasNube && cajasNube.length) {
+        var localC = Cajas.leer();
+        var porRef = {};
+        localC.forEach(function (c) { if (c.ref) porRef[c.ref] = c; });
+        cajasNube.forEach(function (c) { if (c && c.ref && !porRef[c.ref]) porRef[c.ref] = c; });
+        var mezcla = Object.keys(porRef).map(function (k) { return porRef[k]; });
+        _cacheCajas = mezcla;
+        IDB.escribir("cajas", mezcla);
+      } else if (Cajas.leer().length) {
+        Sync.subirCajas();
       }
 
       Sync.marca(fallo ? "err" : "ok");

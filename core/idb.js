@@ -11,13 +11,15 @@ var IDB = {
   abrir: function () {
     if (IDB._db) return Promise.resolve(IDB._db);
     return new Promise(function (resolve, reject) {
-      var req = indexedDB.open("apu-db", 1);
+      var req = indexedDB.open("apu-db", 2);
       req.onupgradeneeded = function (e) {
         var db = e.target.result;
         if (!db.objectStoreNames.contains("proyectos"))  db.createObjectStore("proyectos", { keyPath: "id" });
         if (!db.objectStoreNames.contains("catalogo"))    db.createObjectStore("catalogo");
         if (!db.objectStoreNames.contains("historial"))   db.createObjectStore("historial");
         if (!db.objectStoreNames.contains("plantillas"))  db.createObjectStore("plantillas");
+        if (!db.objectStoreNames.contains("cajas"))       db.createObjectStore("cajas");
+        if (!db.objectStoreNames.contains("bolsas"))      db.createObjectStore("bolsas", { keyPath: "id" });
       };
       req.onsuccess = function (e) {
         IDB._db = e.target.result;
@@ -39,6 +41,8 @@ var IDB = {
       if (raw) { promesas.push(IDB.escribir("historial", JSON.parse(raw))); claves.push(CLAVE_HIST); }
       raw = localStorage.getItem(CLAVE_PLAN);
       if (raw) { promesas.push(IDB.escribir("plantillas", JSON.parse(raw))); claves.push(CLAVE_PLAN); }
+      raw = localStorage.getItem("apu.cajas.custom.v1");
+      if (raw) { promesas.push(IDB.escribir("cajas", JSON.parse(raw))); claves.push("apu.cajas.custom.v1"); }
     } catch (e) { return Promise.resolve(); }
     if (!promesas.length) return Promise.resolve();
     return Promise.all(promesas).then(function () {
@@ -106,6 +110,31 @@ var IDB = {
     return new Promise(function (resolve, reject) {
       var tx = IDB._db.transaction(nombre, "readwrite");
       tx.objectStore(nombre).delete("main");
+      tx.oncomplete = function () { resolve(); };
+      tx.onerror = function () { reject(tx.error); };
+    });
+  },
+
+  todasBolsas: function () {
+    return new Promise(function (resolve, reject) {
+      var tx = IDB._db.transaction("bolsas", "readonly");
+      var req = tx.objectStore("bolsas").getAll();
+      req.onsuccess = function () { resolve(req.result || []); };
+      req.onerror = function () { reject(req.error); };
+    });
+  },
+  guardarBolsa: function (b) {
+    return new Promise(function (resolve, reject) {
+      var tx = IDB._db.transaction("bolsas", "readwrite");
+      tx.objectStore("bolsas").put(b);
+      tx.oncomplete = function () { resolve(); };
+      tx.onerror = function () { reject(tx.error); };
+    });
+  },
+  borrarBolsa: function (id) {
+    return new Promise(function (resolve, reject) {
+      var tx = IDB._db.transaction("bolsas", "readwrite");
+      tx.objectStore("bolsas").delete(id);
       tx.oncomplete = function () { resolve(); };
       tx.onerror = function () { reject(tx.error); };
     });

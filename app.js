@@ -36,6 +36,7 @@ function render() {
   if (vista.pantalla === "sync") return renderSync();
   if (vista.pantalla === "llenado") return renderLlenado();
   if (vista.pantalla === "cajas") return renderCajas();
+  if (vista.pantalla === "bolsas") return renderBolsas();
   if (vista.pantalla === "proyectos") return renderProyectos();
   if (vista.pantalla === "nuevo") return renderNuevo();
   return renderProyecto();
@@ -52,6 +53,7 @@ function barraTop(activa) {
     '<button class="tirab' + (activa === "catalogo" ? " on" : "") + '" data-top="catalogo">Catálogo de insumos</button>' +
     '<button class="tirab' + (activa === "llenado" ? " on" : "") + '" data-top="llenado">Llenado tubería</button>' +
     '<button class="tirab' + (activa === "cajas" ? " on" : "") + '" data-top="cajas">Cajas Enel</button>' +
+    '<button class="tirab' + (activa === "bolsas" ? " on" : "") + '" data-top="bolsas">Bolsas</button>' +
     '<div class="tirasync">' +
       '<span id="syncestado" class="syncestado"></span>' +
       '<button class="tirab" data-top="sync">Sincronización</button>' +
@@ -240,13 +242,15 @@ Nube.yo = (_perfil && _perfil.nombre) || localStorage.getItem("apu.sync.yo") || 
 if (!_perfil) setTimeout(abrirPerfil, 500);
 
 IDB.abrir().then(function () {
-  return Promise.all([IDB.todosProyectos(), IDB.leer("catalogo"), IDB.leer("historial"), IDB.leer("plantillas")]);
+  return Promise.all([IDB.todosProyectos(), IDB.leer("catalogo"), IDB.leer("historial"), IDB.leer("plantillas"), IDB.leer("cajas"), IDB.todasBolsas()]);
 }).then(function (r) {
   _cacheProy = r[0] || [];
   _cacheProy.forEach(normalizarProyecto);
   if (r[1]) { _cacheCat = r[1]; _catLeido = true; }
   _cacheHist = r[2] || [];
   _cachePlan = r[3] || [];
+  _cacheCajas = r[4] || [];
+  _cacheBolsas = r[5] || [];
   render();
   if (typeof recuperarCarpetaRespaldo === "function") recuperarCarpetaRespaldo();
   if (Sync.encendida()) {

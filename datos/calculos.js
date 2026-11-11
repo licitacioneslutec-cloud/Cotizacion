@@ -1,5 +1,56 @@
 "use strict";
 
+/* Detecta el apartado probable a partir de la descripción del ítem */
+function detectarApartadoPorDesc(desc) {
+  var d = (desc || "").toLowerCase();
+  if (/\bcaja\b|gabinete.*inspección|caja.*paso|caja.*derivaci|caja.*empotrar|caja.*sobreponer|cofre/.test(d)) return ["EQ"];
+  if (/\btablero\b|barraje|tga\b|totalizador|panel.*distribuc/.test(d)) return ["TA"];
+  if (/\btuber[ií]a\b|\bducto\b|\btubo\b|\bconduit\b|\bcanaleta\b|\bbandeja\b/.test(d)) return ["TU"];
+  if (/\btoma\b|\bsalida\b|\binterruptor.*sencill|\binterruptor.*dobl|\binterruptor.*tripl|\broseta\b|\bplafón\b|\bapagador\b/.test(d)) return ["SA"];
+  if (/\bcable\b|\bconductor\b|\balambre\b|\bacometida\b/.test(d)) return ["CA"];
+  if (/\bluminaria\b|\breflector\b|\bsensor\b|\bbreaker\b|\bcontactor\b|\brel[ée]\b|\bups\b|\bplanta\b|\bvariador\b|\btransformador\b|\bcelda\b/.test(d)) return ["EQ"];
+  return ["CA"];
+}
+
+/* Detecta sistemas especiales en el proyecto para alertas en armado */
+function detectarSistemasEspeciales(p) {
+  var textos = [];
+  itemsDe(p).forEach(function (x) { textos.push((x.f.desc || "").toLowerCase()); });
+  (p.hojas || []).forEach(function (h) {
+    (h.filas || []).forEach(function (f) {
+      if (f.tipo === "cap" || f.tipo === "sub") textos.push((f.desc || "").toLowerCase());
+    });
+  });
+  var bloque = textos.join(" | ");
+  var alertas = [];
+  var defs = [
+    { tipo: "incendio", titulo: "Red de incendio detectada",
+      color: "#d32f2f", icono: "&#x1F525;",
+      re: /incendio|fplr|detector.*(humo|calor)|sirena.*estrob|alarma.*(incendio|fuego)|panel.*(incendio|detecci)|rociador|sprinkler/,
+      detalle: "Verifique: panel de control, detectores, sirenas estrobo, módulos de supervisión." },
+    { tipo: "telecom", titulo: "Telecomunicaciones detectadas",
+      color: "#1565c0", icono: "&#x1F4E1;",
+      re: /telecomunicaci|derivador|antena|cable.*utp|patch.*panel|fibra.*[oó]ptica|rack.*comunicaci|splitter|acoplador/,
+      detalle: "Verifique: rack, patch panel, fibra óptica, derivadores, jacks, face plates." },
+    { tipo: "apantallamiento", titulo: "Sistema de apantallamiento detectado",
+      color: "#e65100", icono: "&#x26A1;",
+      re: /apantallamiento|pararrayos|terminal.*captaci|bajante.*apantall|malla.*apantall/,
+      detalle: "Verifique: pararrayos, bajantes, malla de apantallamiento, conectores." },
+    { tipo: "tierra", titulo: "Sistema de puesta a tierra detectado",
+      color: "#2e7d32", icono: "&#x1F30D;",
+      re: /puesta.*tierra|copperweld|varilla.*(tierra|cobre)|cable.*desnudo|malla.*tierra|electrodo|soldadura.*exot[eé]rmica|barraje.*tierra/,
+      detalle: "Verifique: varillas, soldadura exotérmica, cable desnudo, barraje de tierra." },
+    { tipo: "mayores", titulo: "Equipos mayores detectados",
+      color: "#6a1b9a", icono: "&#x1F3ED;",
+      re: /transformador(?!.*corriente)|celda.*(media|mt|potencia)|subestaci|tablero.*(general|principal|transfer)|interruptor.*(potencia|media)/,
+      detalle: "Verifique: transformadores, celdas, tableros principales, subestaciones." }
+  ];
+  defs.forEach(function (d) {
+    if (d.re.test(bloque)) alertas.push(d);
+  });
+  return alertas;
+}
+
 /* ------------------------------------------------------------------
    Totales del proyecto
    El unitario de cada análisis se multiplica por la cantidad de cada

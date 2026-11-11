@@ -813,6 +813,12 @@ function ofertaDe(it, p) {
   if (sel === null || sel === undefined || !it.ofertas[sel]) sel = (it.sel !== undefined ? it.sel : 0);
   return it.ofertas[sel] || it.ofertas[0];
 }
+/* Código que se muestra: el Auranet del proveedor elegido; si no hay, el propio.
+   Solo es para mostrar: la clave interna sigue siendo it.cod. */
+function codVisible(it, p) {
+  var of = ofertaDe(it, p);
+  return of && of.codAur ? String(of.codAur).trim() || it.cod : (it ? it.cod : "");
+}
 function costoDe(it, p) {
   if (!it) return 0;
   if (p && p.congelarPrecios && p.preciosCongelados && p.preciosCongelados[it.cod]) {
@@ -860,7 +866,7 @@ function valorizar(cat, lineas, margenes, p) {
     if (esMo) mo += total; else mat += total;
     return {
       cant: l.cant, cantDesp: cantDesp, desp: desp,
-      cod: l.cod, desc: l.desc || (it ? it.desc : ""),
+      cod: l.cod, codVer: it ? codVisible(it, p) : l.cod, desc: l.desc || (it ? it.desc : ""),
       und: l.und || (it ? it.und : ""), base: base, precio: precio, total: total,
       falta: precio <= 0, mo: esMo, f075: l.f075, ajustada: l.ajustada, cantOrig: l.cantOrig,
       propio: l.propio, imp: it ? !!it.imp : false, enCatalogo: !!it,

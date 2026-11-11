@@ -64,6 +64,7 @@ function insumosPorCapitulo(p, cat) {
       u.rent = it ? (it.rent !== undefined ? !!it.rent : true) : true;
       u.ofertas = it ? (it.ofertas || []) : [];
       u.sel = it ? it.sel : undefined;
+      u.codVer = codVisible(u, p);
       u.mo = esManoObra(c);
       u.costoReal = costoDe({ precio: u.precio, ofertas: u.ofertas, sel: u.sel, cod: u.cod }, p);
       return u;
@@ -99,7 +100,8 @@ function vBolsa(p) {
   var cuerpo = grupos.map(function (g) {
     var ver = g.items;
     if (q) ver = ver.filter(function (i) {
-      return i.cod.toLowerCase().indexOf(q) >= 0 || (i.desc || "").toLowerCase().indexOf(q) >= 0;
+      return i.cod.toLowerCase().indexOf(q) >= 0 || i.codVer.toLowerCase().indexOf(q) >= 0 ||
+        (i.desc || "").toLowerCase().indexOf(q) >= 0;
     });
     if (vista.soloSinBolsa) ver = ver.filter(function (i) { return i.costoReal <= 0; });
     if (!ver.length && q) return "";
@@ -110,7 +112,8 @@ function vBolsa(p) {
       var costo = costoDe(itRef, p);
       var venta = precioAjustado(itRef, mg, p);
       return '<tr' + (costo <= 0 ? ' class="filasinp"' : "") + '>' +
-        '<td class="m" style="font-size:12px">' + esc(i.cod) + '</td>' +
+        '<td class="m" style="font-size:12px">' + (i.codVer !== i.cod ? esc(i.codVer) : "—") + '</td>' +
+        '<td class="m" style="font-size:12px;color:var(--ink3)">' + esc(i.cod) + '</td>' +
         '<td>' + esc(i.desc) + (i.propio ? ' <span class="tagpropio">propio</span>' : "") + '</td>' +
         '<td style="color:var(--ink3);font-size:12px">' + esc(i.und) + '</td>' +
         '<td class="num">' + dec(i.cantidad) + '</td>' +
@@ -132,7 +135,9 @@ function vBolsa(p) {
         '<span class="cn" style="color:#93A4B4">' + ver.length + ' insumos · Mat: ' + cop(subMat) + ' · MO: ' + cop(subMo) + '</span>' +
       '</div>' +
       '<div class="scroll"><table class="tbl"><thead><tr>' +
-        '<th style="width:96px">Código</th><th>Descripción</th><th style="width:52px">Und</th>' +
+        '<th style="width:80px" title="Código Auranet del proveedor elegido">Cód. Auranet</th>' +
+        '<th style="width:96px" title="Código único del ítem">Cód. único</th>' +
+        '<th>Descripción</th><th style="width:52px">Und</th>' +
         '<th class="num" style="width:80px">Cantidad</th>' +
         '<th class="num" style="width:100px">Costo</th>' +
         '<th class="num" style="width:100px">Venta</th>' +

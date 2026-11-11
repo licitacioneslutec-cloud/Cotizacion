@@ -16,12 +16,28 @@ function renderCatalogo() {
         '<input type="file" id="fcat" accept=".xlsx,.xlsm,.xls" class="hide">' +
       '</div></div>';
   } else {
+    /* Códigos Auranet (del proveedor elegido) que comparten insumos distintos */
+    var porAur = {}, repes = [], esRepe = {};
+    cat.items.forEach(function (i) {
+      var of = ofertaDe(i, null);
+      var a = of && of.codAur ? String(of.codAur).trim() : "";
+      if (!a) return;
+      if (!porAur[a]) { porAur[a] = []; }
+      porAur[a].push({ it: i, marca: of.marca || "" });
+    });
+    Object.keys(porAur).sort().forEach(function (a) {
+      if (porAur[a].length < 2) return;
+      repes.push({ aur: a, items: porAur[a] });
+      porAur[a].forEach(function (x) { esRepe[x.it.cod] = true; });
+    });
+
     var q = (vista.busca || "").toLowerCase();
     var lista = cat.items;
     if (q) lista = lista.filter(function (i) {
       return i.cod.toLowerCase().indexOf(q) >= 0 || (i.desc || "").toLowerCase().indexOf(q) >= 0;
     });
     if (vista.soloSin) lista = lista.filter(function (i) { return !(Number(i.precio) > 0); });
+    if (vista.soloRepe) lista = lista.filter(function (i) { return esRepe[i.cod]; });
     var tope = vista.tope || 150;
     var muestra = lista.slice(0, tope);
 
@@ -130,6 +146,24 @@ function renderCatalogo() {
       (hist.length ? '<div class="card"><div class="chd"><span class="ct">Últimas actualizaciones</span></div>' +
         '<div class="cbd"><div class="dl">' + histFilas + '</div></div></div>' : "") +
 
+      (repes.length
+        ? '<div class="card" style="border-left:4px solid #e65100">' +
+            '<div class="chd"><span class="ct">Códigos Auranet repetidos</span>' +
+            '<span class="cn">' + repes.length + ' códigos en insumos distintos</span></div>' +
+            '<div class="cbd">' +
+              '<p style="margin:0 0 10px;font-size:13px;color:var(--ink2)">Toca un insumo para abrir sus proveedores ' +
+              'y corregir el código (cód.) o elegir otro proveedor.</p>' +
+              '<div class="dl">' + repes.map(function (r) {
+                return '<div class="dlr" style="align-items:flex-start"><span class="dlk m" style="min-width:70px">' +
+                  esc(r.aur) + '</span><span style="display:flex;flex-direction:column;gap:3px;text-align:left">' +
+                  r.items.map(function (x) {
+                    return '<button class="ofbtn" style="margin:0;text-align:left" data-repe="' + esc(x.it.cod) + '">' +
+                      esc(x.it.cod) + ' · ' + esc(x.it.desc || "") + (x.marca ? ' · ' + esc(x.marca) : "") + '</button>';
+                  }).join("") + '</span></div>';
+              }).join("") + '</div>' +
+            '</div></div>'
+        : "") +
+
       '<div class="card">' +
         '<div class="chd"><span class="ct">Insumos</span>' +
         '<span class="cn">' + lista.length + ' coinciden · se ven ' + muestra.length + '</span></div>' +
@@ -137,6 +171,8 @@ function renderCatalogo() {
           '<input class="in" id="busca" placeholder="Buscar por código o descripción" value="' + esc(vista.busca || "") + '">' +
           '<label class="lbl" style="margin-top:10px"><input type="checkbox" id="solosin"' +
             (vista.soloSin ? " checked" : "") + '> Ver solo los que no tienen precio</label>' +
+          (repes.length ? '<label class="lbl" style="margin-top:6px"><input type="checkbox" id="solorepe"' +
+            (vista.soloRepe ? " checked" : "") + '> Ver solo los que tienen código Auranet repetido</label>' : "") +
         '</div>' +
         '<div class="scroll"><table class="tbl"><thead><tr>' +
           '<th style="width:92px">Código</th><th>Descripción</th><th style="width:70px">Und</th>' +
@@ -204,6 +240,15 @@ function renderCatalogo() {
   };
   var s = document.getElementById("solosin");
   if (s) s.onchange = function () { ir({ soloSin: this.checked, tope: 150 }); };
+  var sr = document.getElementById("solorepe");
+  if (sr) sr.onchange = function () { ir({ soloRepe: this.checked, tope: 150 }); };
+  Array.prototype.forEach.call(document.querySelectorAll("[data-repe]"), function (el) {
+    el.onclick = function () {
+      ir({ busca: el.dataset.repe, abierto: el.dataset.repe, tope: 150 });
+      var t = document.getElementById("busca");
+      if (t) t.scrollIntoView({ block: "start" });
+    };
+  });
 
   /* edición directa de precio, unidad e IVA */
   var editar = function (attr, aplica) {

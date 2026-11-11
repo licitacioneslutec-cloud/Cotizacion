@@ -30,6 +30,7 @@ function insumosDe(p, cat) {
     u.desp = it ? Number(it.desp) || 0 : 0;
     u.ofertas = it ? (it.ofertas || []) : [];
     u.sel = it ? it.sel : undefined;
+    u.codVer = codVisible(u, p);
     u.enCat = !!it;
     u.mo = esManoObra(c);
     return u;
@@ -55,7 +56,8 @@ function vInsumos(p) {
   var q = (vista.buscaIns || "").toLowerCase();
   var ver = lista;
   if (q) ver = ver.filter(function (i) {
-    return i.cod.toLowerCase().indexOf(q) >= 0 || (i.desc || "").toLowerCase().indexOf(q) >= 0;
+    return i.cod.toLowerCase().indexOf(q) >= 0 || i.codVer.toLowerCase().indexOf(q) >= 0 ||
+      (i.desc || "").toLowerCase().indexOf(q) >= 0;
   });
   if (vista.soloSinIns) ver = ver.filter(function (i) { return i.costoReal <= 0; });
 
@@ -92,7 +94,8 @@ function vInsumos(p) {
     var celCosto = '<input class="in m inprecio' + (costo > 0 ? " ok" : "") + '" type="number" min="0" step="1" ' +
       'data-iprecio="' + esc(i.cod) + '" value="' + (costo > 0 ? costo : "") + '" placeholder="sin precio">';
     return '<tr' + (costo <= 0 ? ' class="filasinp"' : "") + (i.mo ? ' data-mo="1"' : "") + '>' +
-      '<td class="m" style="font-size:12px">' + esc(i.cod) + '</td>' +
+      '<td class="m" style="font-size:12px">' + (i.codVer !== i.cod ? esc(i.codVer) : "—") + '</td>' +
+      '<td class="m" style="font-size:12px;color:var(--ink3)">' + esc(i.cod) + '</td>' +
       '<td>' + esc(i.desc) + (i.propio ? ' <span class="tagpropio">propio</span>' : "") + '</td>' +
       '<td style="color:var(--ink3);font-size:12px">' + esc(i.und) + '</td>' +
       '<td class="num">' + dec(i.cantidad) + '</td>' +
@@ -156,7 +159,9 @@ function vInsumos(p) {
         '</div>' +
       '</div>' +
       '<div class="scroll"><table class="tbl"><thead><tr>' +
-        '<th style="width:96px">Código</th><th>Descripción</th><th style="width:52px">Und</th>' +
+        '<th style="width:80px" title="Código Auranet del proveedor elegido">Cód. Auranet</th>' +
+        '<th style="width:96px" title="Código único del ítem">Cód. único</th>' +
+        '<th>Descripción</th><th style="width:52px">Und</th>' +
         '<th class="num" style="width:88px">Cantidad</th>' +
         '<th class="num" style="width:100px" title="Precio de compra">Costo</th>' +
         '<th class="num" style="width:100px" title="Costo con rentabilidad">+ Rent.</th>' +

@@ -76,3 +76,30 @@ var Catalogo = {
 };
 var _idxCat = null, _idxCatDe = null;
 
+var _cacheCajas = null;
+var Cajas = {
+  leer: function () { return _cacheCajas || []; },
+  guardar: function (lista) {
+    _cacheCajas = lista;
+    IDB.escribir("cajas", lista);
+    Sync.subirCajas();
+  }
+};
+
+var _cacheBolsas = [];
+var Bolsas = {
+  todos: function () { return _cacheBolsas; },
+  leer: function (id) { return _cacheBolsas.find(function (b) { return b.id === id; }) || null; },
+  guardar: function (b) {
+    b.modificado = new Date().toISOString();
+    var i = -1;
+    for (var k = 0; k < _cacheBolsas.length; k++) if (_cacheBolsas[k].id === b.id) { i = k; break; }
+    if (i >= 0) _cacheBolsas[i] = b; else _cacheBolsas.push(b);
+    IDB.guardarBolsa(b);
+  },
+  borrar: function (id) {
+    _cacheBolsas = _cacheBolsas.filter(function (b) { return b.id !== id; });
+    IDB.borrarBolsa(id);
+  }
+};
+

@@ -21,12 +21,8 @@ var CAJAS_ENEL = [
 
 var CLAVE_CAJAS = "apu.cajas.custom.v1";
 
-function cajasCustom() {
-  try { return JSON.parse(localStorage.getItem(CLAVE_CAJAS)) || []; } catch (e) { return []; }
-}
-function guardarCajasCustom(lista) {
-  localStorage.setItem(CLAVE_CAJAS, JSON.stringify(lista));
-}
+function cajasCustom() { return Cajas.leer(); }
+function guardarCajasCustom(lista) { Cajas.guardar(lista); }
 
 function parseDimsCaja(s) {
   if (!s) return null;
@@ -136,7 +132,7 @@ function renderCajas() {
 
     '<div class="note"><div class="notet">Fuente de datos</div>' +
       '<div class="noteb">Dimensiones tomadas de las normas de construcción Enel Colombia (CS274, CS275, CS276, CS277). ' +
-      'Verificar contra la norma vigente en likinormas.enelcol.com.co. Las cajas personalizadas se guardan en este navegador.</div></div>' +
+      'Verificar contra la norma vigente en likinormas.enelcol.com.co. Las cajas personalizadas se sincronizan con la nube.</div></div>' +
 
     '</main>';
 

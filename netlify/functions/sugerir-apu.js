@@ -21,7 +21,7 @@ TU (Tubería). opciones.TU = {"MATERIAL":{"TIPO":["diam1","diam2",...]}}. Respet
 
 EQ (Equipos). opciones.EQ = {"FAMILIA":["SUBFAMILIA1",...]}. familia DEBE ser una clave de opciones.EQ y subfamilia DEBE ser un valor del arreglo bajo esa clave. NUNCA combines una familia con una subfamilia de otra familia.
 - Campos: familia, subfamilia, cantidad (default 1)
-- Usa EQ para: interruptor, breaker, totalizador, contactor, relé, UPS, planta, luminaria, reflector, sensor, variador
+- Usa EQ para: interruptor, breaker, totalizador, contactor, relé, UPS, planta, luminaria, reflector, sensor, variador, caja eléctrica, caja de paso, caja de inspección, caja de derivación, cofre
 - Equipos especiales (transformadores, celdas, TGA, tableros de fabricación especial) van en EQ: busca en las familias del catálogo.
 
 CA (Cableado). opciones.CA.cables[] con {cod, desc}.
@@ -63,7 +63,7 @@ TAREA: Organizar ítems de un presupuesto eléctrico.
    - CA (Cableados): cable, conductor, alimentador, circuito, parte de cable de una acometida
    - TU (Tuberías): tubería, canalización, ducto, conduit, parte de tubo de una acometida
    - TA (Tableros): tablero, gabinete, panel de distribución, barraje, cofre
-   - EQ (Equipos): interruptor, breaker, totalizador, contactor, relé, UPS, planta, luminaria, reflector, sensor, variador, transformador, celda, TGA
+   - EQ (Equipos): interruptor, breaker, totalizador, contactor, relé, UPS, planta, luminaria, reflector, sensor, variador, transformador, celda, TGA, caja eléctrica, caja de paso, caja de inspección, caja de derivación
    - SA (Salidas): salida, punto eléctrico, toma, interruptor de luz, punto de iluminación o datos
    - mo (Módulos): instalación, montaje, conexión, pruebas, certificación, canaleta, bandeja portacables
 

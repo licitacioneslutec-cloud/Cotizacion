@@ -115,7 +115,7 @@ function imprimirPropuesta(p) {
     var comp = componerAnalisis(cat, datos, p, a.apu);
     var val = valorizar(cat, comp.lineas, margenesDe(p, a.apu), p);
     var fl = function (l) {
-      return '<tr><td class="c">' + esc(l.cod) + '</td><td>' + esc(l.desc) + '</td>' +
+      return '<tr><td class="c">' + esc(l.codVer || l.cod) + '</td><td>' + esc(l.desc) + '</td>' +
         '<td class="c">' + esc(l.und) + '</td><td class="n">' + dec(l.cant) + '</td>' +
         '<td class="n">' + (l.desp ? l.desp + "%" : "") + '</td>' +
         '<td class="n">' + (l.falta ? "—" : cop(l.precio)) + '</td>' +
@@ -552,6 +552,8 @@ function exportarTodo(p) {
   /* ===== 3. ANÁLISIS ===== */
   var a3 = wb.addWorksheet("Análisis", { views: [{ showGridLines: false }] });
   a3.columns = [13, 56, 7, 11, 8, 14, 15].map(function (w) { return { width: w }; });
+  /* Columna H oculta: código propio, para que el importador empareje aunque A muestre el Auranet */
+  a3.getColumn(8).hidden = true;
   var ra = 1;
   analisisDe(p).forEach(function (aa) {
     var val = analisisCache[aa.apu];
@@ -591,13 +593,13 @@ function exportarTodo(p) {
         precioCell = { formula: "Insumos!$G$" + insRow[l.cod], result: precioVal || 0 };
         totalCell = { formula: "D" + ra + "*(1+E" + ra + ")*F" + ra, result: totalVal || 0 };
       }
-      var r = a3.addRow([l.cod, l.desc, l.und, l.cant, l.desp ? l.desp / 100 : null,
-                         precioCell, totalCell]);
+      var r = a3.addRow([l.codVer || l.cod, l.desc, l.und, l.cant, l.desp ? l.desp / 100 : null,
+                         precioCell, totalCell, l.cod]);
       r.eachCell(function (cel, cn) {
         cel.font = { size: 9 }; cel.border = borde;
         if (cn === 4) cel.numFmt = "#,##0.####";
         if (cn === 5) cel.numFmt = "0%";
-        if (cn >= 6) cel.numFmt = moneda;
+        if (cn === 6 || cn === 7) cel.numFmt = moneda;
       });
       ra++;
     };
@@ -654,7 +656,7 @@ function exportarTodo(p) {
     var venta = precioAjustado({ precio: i.precio, imp: i.imp, rent: i.rent, propio: i.propio, ofertas: i.ofertas, sel: i.sel, cod: i.cod }, mg, p);
     var costo = costoDe({ precio: i.precio, propio: i.propio, ofertas: i.ofertas, sel: i.sel, cod: i.cod }, p);
     var valeCell = costo > 0 ? { formula: "G" + ri + "*D" + ri, result: venta * i.cantidad } : null;
-    var r = i4.addRow([i.cod, i.desc, i.und, i.cantidad, i.desp ? i.desp / 100 : null,
+    var r = i4.addRow([i.codVer || i.cod, i.desc, i.und, i.cantidad, i.desp ? i.desp / 100 : null,
                        costo || null, venta || null, valeCell, i.apus.join(", ")]);
     r.eachCell(function (cel, cn) {
       cel.font = { size: 9 }; cel.border = borde;
@@ -678,6 +680,52 @@ function exportarTodo(p) {
   }).catch(function (e) {
     avisoError("No se pudo generar el Excel con formato: " + (e && e.message ? e.message : e));
     exportarTodoSimple(p);
+  });
+}
+
+/* Carta Word con la plantilla Lutec (plantillas/carta_lutec.docx): una viñeta por consideración */
+function exportarCartaConsideraciones(p) {
+  var lineas = String(p.consideraciones || "").split("\n")
+    .map(function (l) { return l.trim(); }).filter(Boolean);
+  if (!lineas.length) { avisoError("Escribe primero las consideraciones del proyecto."); return; }
+  if (typeof JSZip === "undefined") { avisoError("No cargó la librería para generar Word. Revisa la conexión."); return; }
+
+  var xml = function (s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  };
+  var meses = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto",
+               "septiembre", "octubre", "noviembre", "diciembre"];
+  var f = String(p.entregaObs || hoy()).split("-");
+  var fechaLarga = Number(f[2]) + " de " + meses[Number(f[1]) - 1] + " de " + f[0];
+  var proyecto = p.nombre || "";
+
+  fetch("plantillas/carta_lutec.docx").then(function (r) {
+    if (!r.ok) throw new Error("no se encontró la plantilla");
+    return r.arrayBuffer();
+  }).then(JSZip.loadAsync).then(function (zip) {
+    return zip.file("word/document.xml").async("string").then(function (doc) {
+      var item = /<w:p>(?:(?!<w:p>).)*?\{ITEM\}.*?<\/w:p>/.exec(doc)[0];
+      /* Reemplazos con función: así un "$" en el texto no se interpreta como patrón */
+      var poner = function (d, marca, valor) { return d.replace(marca, function () { return xml(valor); }); };
+      doc = doc.replace(item, function () {
+        return lineas.map(function (l) { return poner(item, "{ITEM}", l); }).join("");
+      });
+      doc = poner(doc, "{FECHA}", fechaLarga);
+      doc = poner(doc, "{SRES}", p.cliente || p.constructora || "");
+      doc = poner(doc, "{ASUNTO}", "Consideraciones – " + proyecto);
+      doc = poner(doc, "{PROYECTO}", proyecto);
+      zip.file("word/document.xml", doc);
+      return zip.generateAsync({ type: "blob",
+        mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+    });
+  }).then(function (blob) {
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "Consideraciones_" + (proyecto || "proyecto").replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "_") + ".docx";
+    a.click(); URL.revokeObjectURL(a.href);
+    avisoOk("Carta descargada.");
+  }).catch(function (e) {
+    avisoError("No se pudo generar la carta: " + (e && e.message ? e.message : e));
   });
 }
 

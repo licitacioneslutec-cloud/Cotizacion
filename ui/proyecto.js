@@ -630,7 +630,9 @@ function vFicha(p, r) {
     '<div class="card"><div class="chd"><span class="ct">Consideraciones del proyecto</span>' +
       '<span class="cn">Van a la carta de oferta</span></div><div class="cbd">' +
       '<textarea class="in" id="f-cons" placeholder="Condiciones acordadas, exclusiones, criterios técnicos.">' +
-      esc(p.consideraciones || "") + '</textarea></div></div>' +
+      esc(p.consideraciones || "") + '</textarea>' +
+      '<div class="btnrow" style="margin-top:10px"><button class="btn" id="cartacons">Descargar carta (Word)</button></div>' +
+      '</div></div>' +
 
     '<div class="card"><div class="chd"><span class="ct">Valor de la oferta</span>' +
       '<span class="cn">Se recalcula con cada análisis</span></div><div class="cbd">' +
@@ -695,6 +697,10 @@ function enlazarFicha(p) {
     guardar(); render();
   };
   document.getElementById("f-cons").onblur = function () { p.consideraciones = this.value; guardar(); };
+  document.getElementById("cartacons").onclick = function () {
+    p.consideraciones = document.getElementById("f-cons").value; guardar();
+    exportarCartaConsideraciones(p);
+  };
   Array.prototype.forEach.call(document.querySelectorAll("[data-mg]"), function (el) {
     el.oninput = function () { p.margenes[el.dataset.mg] = Number(el.value) || 0; guardar(); render(); };
   });
@@ -1215,6 +1221,11 @@ function vArmado(p, r) {
         '<input class="in infiltro" id="filtroapuarmado" placeholder="Filtrar por nº de análisis" value="' +
           esc(vista.filtroArmadoApu || "") + '" style="margin-left:8px;max-width:200px">' +
       '</div>' +
+      detectarSistemasEspeciales(p).map(function (a) {
+        return '<div style="background:' + a.color + '14;border-left:4px solid ' + a.color +
+          ';padding:8px 12px;margin:6px 0;border-radius:4px;font-size:13px">' +
+          '<strong>' + a.icono + ' ' + a.titulo + '</strong> — ' + a.detalle + '</div>';
+      }).join("") +
       '<div class="scroll"><table class="tbl tblarmado"><thead><tr>' +
         '<th style="width:34px"><span class="sr">Elegir</span></th>' +
         '<th style="width:58px">Ítem</th><th>Descripción</th>' +
@@ -1299,7 +1310,7 @@ function enlazarArmado(p) {
         var n = parseInt(v, 10);
         if (isNaN(n) || n <= 0) { avisoError("El número de análisis debe ser un entero positivo."); return; }
         f.apu = n;
-        if (!f.cod || !f.cod.length) f.cod = ["CA"];
+        if (!f.cod || !f.cod.length) f.cod = detectarApartadoPorDesc(f.desc);
       }
       Store.guardar(p); render();
     };
