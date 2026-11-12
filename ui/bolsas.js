@@ -9,7 +9,7 @@
 
 function bolsaDisponible(b, cod) {
   var total = 0;
-  (b.items || []).forEach(function (it) { if (it.tipo === "it" && it.cod === cod) total = it.cantTotal || 0; });
+  (b.items || []).forEach(function (it) { if (it.tipo === "it" && it.cod === cod) total += (it.cantTotal || 0); });
   (b.pedidos || []).forEach(function (ped) {
     if (ped.tipo === "adicional" || ped.tipo === "omision") return;
     (ped.items || []).forEach(function (pi) { if (pi.cod === cod) total -= (pi.cant || 0); });
@@ -337,6 +337,7 @@ function renderBolsaFicha(b) {
             '<label class="btn" style="cursor:pointer;white-space:nowrap">Importar presupuesto Excel' +
               '<input type="file" id="bf-presfile" accept=".xlsx,.xlsm" style="display:none"></label>' +
           '</div>' + statPres +
+          _htmlMapeoPresupuesto() +
         '</div>' +
         '<div class="btnrow" style="margin-top:12px">' +
           '<button class="btn btnp" id="bf-guardar">Guardar cambios</button>' +
@@ -372,13 +373,27 @@ function renderBolsaFicha(b) {
     var reader = new FileReader();
     reader.onload = function (ev) {
       try {
-        var res = importarPresupuestoExcel(new Uint8Array(ev.target.result), b);
-        avisoOk("Presupuesto importado: " + res.items + " ítems, " + res.apus + " APUs.");
+        _wbPresup = XLSX.read(new Uint8Array(ev.target.result), { type: "array" });
+        _wbPresupHojaOf = 0;
+        _wbPresupHojaApu = -1;
+        for (var i = 0; i < _wbPresup.SheetNames.length; i++) {
+          var nl = _wbPresup.SheetNames[i].toLowerCase();
+          if (nl.indexOf("oferta") >= 0 || nl.indexOf("cotizacion") >= 0 || nl.indexOf("presupuesto") >= 0) _wbPresupHojaOf = i;
+          if (nl === "apu" || nl === "apus") _wbPresupHojaApu = i;
+        }
         render();
-      } catch (err) { avisoError("Error al importar presupuesto: " + err.message); }
+      } catch (err) { avisoError("Error al leer el archivo: " + err.message); }
     };
     reader.readAsArrayBuffer(f);
   };
+  var mpHojaOf = document.getElementById("mp-hojaOf");
+  if (mpHojaOf) mpHojaOf.onchange = function () { _wbPresupHojaOf = Number(this.value); render(); };
+  var mpHojaApu = document.getElementById("mp-hojaApu");
+  if (mpHojaApu) mpHojaApu.onchange = function () { _wbPresupHojaApu = Number(this.value); render(); };
+  var mpImportar = document.getElementById("mp-importar");
+  if (mpImportar) mpImportar.onclick = function () { importarPresupuestoConMapeo(b); };
+  var mpCancelar = document.getElementById("mp-cancelar");
+  if (mpCancelar) mpCancelar.onclick = function () { _wbPresup = null; render(); };
   document.getElementById("bf-respaldo").onclick = function () {
     var blob = new Blob([JSON.stringify(b, null, 2)], { type: "application/json" });
     var a = document.createElement("a");
@@ -931,14 +946,18 @@ function renderBolsaResumen(b) {
 /* ---- Presupuesto y APUs (cruce con proyecto) ---- */
 
 var ROLES_PRESUPUESTO = [
-  { id: "apu", test: function (t) { return t === "apu"; } },
-  { id: "desc", test: function (t) { return t.indexOf("descripcion") === 0; } },
-  { id: "und", test: function (t) { return t === "unidad" || t === "und" || t === "um"; } },
-  { id: "cant", test: function (t) { return t === "cantidad" || t === "cant"; } },
-  { id: "precioUnit", test: function (t) { return t === "valorunitario" || t === "preciounitario" || t === "vlrunitario"; } },
-  { id: "valorTotal", test: function (t) { return t === "valortotal" || t === "vlrtotal"; } },
-  { id: "item", test: function (t) { return t === "n" || t === "no" || t === "item" || t === "numero"; } }
+  { id: "apu", nombre: "APU", test: function (t) { return t === "apu"; } },
+  { id: "desc", nombre: "Descripción", test: function (t) { return t.indexOf("descripcion") === 0; } },
+  { id: "und", nombre: "Unidad", test: function (t) { return t === "unidad" || t === "und" || t === "um"; } },
+  { id: "cant", nombre: "Cantidad", test: function (t) { return t === "cantidad" || t === "cant"; } },
+  { id: "precioUnit", nombre: "Precio unitario", test: function (t) { return t === "valorunitario" || t === "preciounitario" || t === "vlrunitario"; } },
+  { id: "valorTotal", nombre: "Valor total", test: function (t) { return t === "valortotal" || t === "vlrtotal"; } },
+  { id: "item", nombre: "Item / Número", test: function (t) { return t === "n" || t === "no" || t === "item" || t === "numero"; } }
 ];
+
+var _wbPresup = null;
+var _wbPresupHojaOf = 0;
+var _wbPresupHojaApu = -1;
 
 function _cellVal(sheet, r, c) {
   var cell = sheet[XLSX.utils.encode_cell({ r: r, c: c })];
@@ -976,89 +995,154 @@ function _hallarColBaseAPU(sheet) {
   return -1;
 }
 
-function importarPresupuestoExcel(buffer, b) {
-  var wb = XLSX.read(buffer, { type: "array" });
-  var oferta = null;
-  for (var si = 0; si < wb.SheetNames.length; si++) {
-    if (wb.SheetNames[si].toLowerCase().indexOf("oferta") >= 0) { oferta = wb.Sheets[wb.SheetNames[si]]; break; }
+function _htmlMapeoPresupuesto() {
+  if (!_wbPresup) return "";
+  var wb = _wbPresup;
+  var optsHojas = wb.SheetNames.map(function (n, i) {
+    return '<option value="' + i + '"' + (i === _wbPresupHojaOf ? " selected" : "") + '>' + esc(n) + '</option>';
+  }).join("");
+  var optsApu = '<option value="-1">— No importar APUs —</option>' +
+    wb.SheetNames.map(function (n, i) {
+      return '<option value="' + i + '"' + (i === _wbPresupHojaApu ? " selected" : "") + '>' + esc(n) + '</option>';
+    }).join("");
+
+  var sheet = wb.Sheets[wb.SheetNames[_wbPresupHojaOf]];
+  var det = sheet ? _detectarEnHoja(sheet, ROLES_PRESUPUESTO) : null;
+  var columnas = [];
+  if (sheet) {
+    var rng = XLSX.utils.decode_range(sheet["!ref"] || "A1");
+    var hr = det ? det.fila : 0;
+    for (var c = rng.s.c; c <= rng.e.c; c++) {
+      var v = _cellVal(sheet, hr, c);
+      var nombre = v != null ? String(v).trim() : "";
+      if (!nombre) continue;
+      var rol = null;
+      if (det) Object.keys(det.mapa).forEach(function (k) { if (det.mapa[k] === c) rol = k; });
+      columnas.push({ i: c, nombre: nombre, rol: rol });
+    }
   }
+
+  var opciones = function (rolActual) {
+    var o = '<option value=""' + (rolActual ? "" : " selected") + '>No usar</option>';
+    ROLES_PRESUPUESTO.forEach(function (r) {
+      o += '<option value="' + r.id + '"' + (rolActual === r.id ? " selected" : "") + '>' + esc(r.nombre) + '</option>';
+    });
+    return o;
+  };
+  var filasTbl = columnas.map(function (c) {
+    return '<tr><td class="m" style="font-size:12px">' + esc(c.nombre) + '</td>' +
+      '<td><select class="in" data-cpres="' + c.i + '">' + opciones(c.rol) + '</select></td></tr>';
+  }).join("");
+
+  return '<div style="margin-top:12px;padding:12px;border:1px solid var(--borde,#dde3e8);border-radius:6px;background:var(--bg2,#f7f9fb)">' +
+    '<div class="lbl" style="font-weight:700;margin-bottom:8px">Mapeo del archivo cargado</div>' +
+    '<div class="g" style="grid-template-columns:1fr 1fr;gap:10px">' +
+      '<div><label class="lbl">Hoja de presupuesto</label><select class="in" id="mp-hojaOf">' + optsHojas + '</select></div>' +
+      '<div><label class="lbl">Hoja de APUs</label><select class="in" id="mp-hojaApu">' + optsApu + '</select></div>' +
+    '</div>' +
+    (columnas.length
+      ? '<label class="lbl" style="margin-top:10px;display:block">Columnas encontradas</label>' +
+        '<div class="scroll" style="max-height:200px"><table class="tbl"><thead><tr>' +
+          '<th style="width:46%">En el archivo</th><th>Corresponde a</th></tr></thead>' +
+          '<tbody>' + filasTbl + '</tbody></table></div>'
+      : '<div style="margin-top:8px;color:#888">No se detectaron columnas en esta hoja</div>') +
+    '<div class="btnrow" style="margin-top:10px">' +
+      '<button class="btn btnp" id="mp-importar">Importar con este mapeo</button>' +
+      '<button class="btn" id="mp-cancelar" style="margin-left:8px">Cancelar</button>' +
+    '</div></div>';
+}
+
+function _extraerPresupuesto(sheet, mapa) {
   var presupuesto = [];
-  if (oferta) {
-    var det = _detectarEnHoja(oferta, ROLES_PRESUPUESTO);
-    if (det) {
-      var m = det.mapa;
-      var rng = XLSX.utils.decode_range(oferta["!ref"] || "A1");
-      for (var r = det.fila + 1; r <= rng.e.r; r++) {
-        var vApu = m.apu !== undefined ? (Number(_cellVal(oferta, r, m.apu)) || 0) : 0;
-        var vDesc = m.desc !== undefined ? String(_cellVal(oferta, r, m.desc) != null ? _cellVal(oferta, r, m.desc) : "").trim() : "";
-        if (!vDesc) continue;
-        if (!vApu) { presupuesto.push({ tipo: "cap", desc: vDesc }); continue; }
-        presupuesto.push({
-          tipo: "it",
-          item: m.item !== undefined ? String(_cellVal(oferta, r, m.item) != null ? _cellVal(oferta, r, m.item) : "") : "",
-          desc: vDesc,
-          und: m.und !== undefined ? String(_cellVal(oferta, r, m.und) != null ? _cellVal(oferta, r, m.und) : "") : "",
-          cant: m.cant !== undefined ? (Number(_cellVal(oferta, r, m.cant)) || 0) : 0,
-          apu: vApu,
-          precioUnit: m.precioUnit !== undefined ? (Number(_cellVal(oferta, r, m.precioUnit)) || 0) : 0,
-          valorTotal: m.valorTotal !== undefined ? (Number(_cellVal(oferta, r, m.valorTotal)) || 0) : 0
+  var rng = XLSX.utils.decode_range(sheet["!ref"] || "A1");
+  var det = _detectarEnHoja(sheet, ROLES_PRESUPUESTO);
+  var inicio = det ? det.fila + 1 : 1;
+  var m = {};
+  Object.keys(mapa).forEach(function (k) { m[k] = mapa[k]; });
+  for (var r = inicio; r <= rng.e.r; r++) {
+    var vApu = m.apu !== undefined ? (Number(_cellVal(sheet, r, m.apu)) || 0) : 0;
+    var vDesc = m.desc !== undefined ? String(_cellVal(sheet, r, m.desc) != null ? _cellVal(sheet, r, m.desc) : "").trim() : "";
+    if (!vDesc) continue;
+    if (!vApu) { presupuesto.push({ tipo: "cap", desc: vDesc }); continue; }
+    presupuesto.push({
+      tipo: "it",
+      item: m.item !== undefined ? String(_cellVal(sheet, r, m.item) != null ? _cellVal(sheet, r, m.item) : "") : "",
+      desc: vDesc,
+      und: m.und !== undefined ? String(_cellVal(sheet, r, m.und) != null ? _cellVal(sheet, r, m.und) : "") : "",
+      cant: m.cant !== undefined ? (Number(_cellVal(sheet, r, m.cant)) || 0) : 0,
+      apu: vApu,
+      precioUnit: m.precioUnit !== undefined ? (Number(_cellVal(sheet, r, m.precioUnit)) || 0) : 0,
+      valorTotal: m.valorTotal !== undefined ? (Number(_cellVal(sheet, r, m.valorTotal)) || 0) : 0
+    });
+  }
+  return presupuesto;
+}
+
+function _extraerApuExcel(sheet) {
+  var apuExcel = [];
+  var bc = _hallarColBaseAPU(sheet);
+  if (bc < 0) return apuExcel;
+  var rng = XLSX.utils.decode_range(sheet["!ref"] || "A1");
+  var r2 = rng.s.r;
+  while (r2 <= rng.e.r) {
+    var vk = _cellVal(sheet, r2, bc);
+    var sk = vk != null ? String(vk).trim() : "";
+    if (sk.indexOf("ITEM") < 0 || sk.indexOf(":") < 0) { r2++; continue; }
+    r2++;
+    if (r2 > rng.e.r) break;
+    var apuObj = {
+      apu: Number(_cellVal(sheet, r2, bc)) || 0,
+      desc: String(_cellVal(sheet, r2, bc + 1) != null ? _cellVal(sheet, r2, bc + 1) : ""),
+      und: String(_cellVal(sheet, r2, bc + 2) != null ? _cellVal(sheet, r2, bc + 2) : ""),
+      cant: Number(_cellVal(sheet, r2, bc + 3)) || 0,
+      insumos: []
+    };
+    r2++;
+    while (r2 <= rng.e.r) {
+      var vi = _cellVal(sheet, r2, bc);
+      var si3 = vi != null ? String(vi).trim() : "";
+      if (si3.indexOf("ITEM") >= 0 && si3.indexOf(":") >= 0) break;
+      if (!si3 || si3 === "-" || /^I{1,3}\./.test(si3) ||
+          si3.toUpperCase().indexOf("CODIGO") >= 0 ||
+          si3.toUpperCase().indexOf("SUBTOTAL") >= 0 ||
+          si3.toUpperCase().indexOf("DESCRIPCI") >= 0) { r2++; continue; }
+      var cantVal = Number(_cellVal(sheet, r2, bc + 3)) || 0;
+      if (cantVal > 0) {
+        apuObj.insumos.push({
+          cod: si3,
+          desc: String(_cellVal(sheet, r2, bc + 1) != null ? _cellVal(sheet, r2, bc + 1) : ""),
+          und: String(_cellVal(sheet, r2, bc + 2) != null ? _cellVal(sheet, r2, bc + 2) : ""),
+          cant: cantVal
         });
       }
+      r2++;
     }
+    if (apuObj.apu > 0 && apuObj.insumos.length) apuExcel.push(apuObj);
   }
+  return apuExcel;
+}
 
-  var apuSheet = null;
-  for (var si2 = 0; si2 < wb.SheetNames.length; si2++) {
-    if (wb.SheetNames[si2].toUpperCase() === "APU") { apuSheet = wb.Sheets[wb.SheetNames[si2]]; break; }
-  }
+function importarPresupuestoConMapeo(b) {
+  if (!_wbPresup) return;
+  var wb = _wbPresup;
+  var mapa = {};
+  Array.prototype.forEach.call(document.querySelectorAll("[data-cpres]"), function (x) {
+    if (x.value) mapa[x.value] = Number(x.dataset.cpres);
+  });
+  var sheetOf = wb.Sheets[wb.SheetNames[_wbPresupHojaOf]];
+  var presupuesto = sheetOf ? _extraerPresupuesto(sheetOf, mapa) : [];
   var apuExcel = [];
-  if (apuSheet) {
-    var bc = _hallarColBaseAPU(apuSheet);
-    if (bc >= 0) {
-      var rng2 = XLSX.utils.decode_range(apuSheet["!ref"] || "A1");
-      var r2 = rng2.s.r;
-      while (r2 <= rng2.e.r) {
-        var vk = _cellVal(apuSheet, r2, bc);
-        var sk = vk != null ? String(vk).trim() : "";
-        if (sk.indexOf("ITEM") < 0 || sk.indexOf(":") < 0) { r2++; continue; }
-        r2++;
-        if (r2 > rng2.e.r) break;
-        var apuObj = {
-          apu: Number(_cellVal(apuSheet, r2, bc)) || 0,
-          desc: String(_cellVal(apuSheet, r2, bc + 1) != null ? _cellVal(apuSheet, r2, bc + 1) : ""),
-          und: String(_cellVal(apuSheet, r2, bc + 2) != null ? _cellVal(apuSheet, r2, bc + 2) : ""),
-          cant: Number(_cellVal(apuSheet, r2, bc + 3)) || 0,
-          insumos: []
-        };
-        r2++;
-        while (r2 <= rng2.e.r) {
-          var vi = _cellVal(apuSheet, r2, bc);
-          var si3 = vi != null ? String(vi).trim() : "";
-          if (si3.indexOf("ITEM") >= 0 && si3.indexOf(":") >= 0) break;
-          if (!si3 || si3 === "-" || /^I{1,3}\./.test(si3) ||
-              si3.toUpperCase().indexOf("CODIGO") >= 0 ||
-              si3.toUpperCase().indexOf("SUBTOTAL") >= 0 ||
-              si3.toUpperCase().indexOf("DESCRIPCI") >= 0) { r2++; continue; }
-          var cantVal = Number(_cellVal(apuSheet, r2, bc + 3)) || 0;
-          if (cantVal > 0) {
-            apuObj.insumos.push({
-              cod: si3,
-              desc: String(_cellVal(apuSheet, r2, bc + 1) != null ? _cellVal(apuSheet, r2, bc + 1) : ""),
-              und: String(_cellVal(apuSheet, r2, bc + 2) != null ? _cellVal(apuSheet, r2, bc + 2) : ""),
-              cant: cantVal
-            });
-          }
-          r2++;
-        }
-        if (apuObj.apu > 0 && apuObj.insumos.length) apuExcel.push(apuObj);
-      }
-    }
+  if (_wbPresupHojaApu >= 0) {
+    var sheetApu = wb.Sheets[wb.SheetNames[_wbPresupHojaApu]];
+    if (sheetApu) apuExcel = _extraerApuExcel(sheetApu);
   }
-
   b.presupuesto = presupuesto;
   b.apuExcel = apuExcel;
   Bolsas.guardar(b);
-  return { items: presupuesto.filter(function (x) { return x.tipo === "it"; }).length, apus: apuExcel.length };
+  _wbPresup = null;
+  var nItems = presupuesto.filter(function (x) { return x.tipo === "it"; }).length;
+  avisoOk("Presupuesto importado: " + nItems + " ítems, " + apuExcel.length + " APUs.");
+  render();
 }
 
 function importarInventarioDesdeProyecto(b) {
@@ -1066,22 +1150,52 @@ function importarInventarioDesdeProyecto(b) {
   if (!p || !p.datosApu) return 0;
   var cat = Catalogo.leer();
   if (!cat || !cat.comp) return 0;
+
+  var capPorApu = {};
+  (p.hojas || []).forEach(function (h) {
+    if (!h.usar) return;
+    var capActual = "Sin capítulo";
+    (h.filas || []).forEach(function (f) {
+      if (f.tipo === "cap") { capActual = f.desc || f.item || "Sin capítulo"; return; }
+      if (f.tipo === "it" && f.apu && !capPorApu[f.apu]) capPorApu[f.apu] = capActual;
+    });
+  });
+
   var existentes = {};
-  (b.items || []).forEach(function (it) { if (it.tipo === "it" && it.cod) existentes[it.cod] = true; });
-  var nuevos = 0;
+  (b.items || []).forEach(function (it) {
+    if (it.tipo === "it" && it.cod) existentes[it.cod + "|" + (it.capitulo || "")] = true;
+  });
+
+  var acum = {};
   analisisDe(p).forEach(function (a) {
     var datos = (p.datosApu && p.datosApu[a.apu]) || {};
     var comp = componerAnalisis(cat, datos, p, a.apu);
+    var cantAnexo = a.items.reduce(function (t, x) { return t + (Number(x.cant) || 0); }, 0);
+    var cap = capPorApu[a.apu] || "Sin capítulo";
     comp.lineas.forEach(function (l) {
-      if (!l.cod || existentes[l.cod]) return;
-      existentes[l.cod] = true;
-      if (!b.items) b.items = [];
-      b.items.push({
-        tipo: "it", cod: l.cod, desc: l.desc || "", und: l.und || "",
-        cantTotal: 0, precio: l.precio || 0, capitulo: "", codAuranet: ""
-      });
-      nuevos++;
+      if (!l.cod) return;
+      var clave = l.cod + "|" + cap;
+      if (existentes[clave]) return;
+      if (!acum[clave]) {
+        var ins = insumoDe(cat, l.cod, p);
+        acum[clave] = {
+          cod: l.cod, desc: l.desc || "", und: l.und || "",
+          cantTotal: 0, precio: ins ? (Number(ins.precio) || 0) : 0, capitulo: cap
+        };
+      }
+      acum[clave].cantTotal += l.cant * cantAnexo;
     });
+  });
+
+  if (!b.items) b.items = [];
+  var nuevos = 0;
+  Object.keys(acum).forEach(function (k) {
+    var a = acum[k];
+    b.items.push({
+      tipo: "it", cod: a.cod, desc: a.desc, und: a.und,
+      cantTotal: a.cantTotal, precio: a.precio, capitulo: a.capitulo, codAuranet: ""
+    });
+    nuevos++;
   });
   if (nuevos) Bolsas.guardar(b);
   return nuevos;
