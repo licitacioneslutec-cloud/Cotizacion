@@ -7,14 +7,40 @@
 
 /* ---- Helpers de cálculo ---- */
 
-function bolsaDisponible(b, cod) {
+/* Un ítem de la bolsa se identifica por código + capítulo (el mismo código puede estar en varios capítulos).
+   Las líneas de pedido guardan `cap`; las antiguas (sin `cap`) se cargan al primer ítem con ese código. */
+function bolsaCapDeLinea(b, li) {
+  if (li.cap !== undefined && li.cap !== null) return li.cap;
+  var it = bolsaItemPorCod(b, li.cod);
+  return it ? (it.capitulo || "") : "";
+}
+
+/* cap undefined = todos los capítulos de ese código */
+function bolsaDisponible(b, cod, cap) {
+  var porCap = cap !== undefined && cap !== null;
   var total = 0;
-  (b.items || []).forEach(function (it) { if (it.tipo === "it" && it.cod === cod) total += (it.cantTotal || 0); });
+  (b.items || []).forEach(function (it) {
+    if (it.tipo === "it" && it.cod === cod && (!porCap || (it.capitulo || "") === cap)) total += (it.cantTotal || 0);
+  });
   (b.pedidos || []).forEach(function (ped) {
     if (ped.tipo === "adicional" || ped.tipo === "omision") return;
-    (ped.items || []).forEach(function (pi) { if (pi.cod === cod) total -= (pi.cant || 0); });
+    (ped.items || []).forEach(function (pi) {
+      if (pi.cod === cod && (!porCap || bolsaCapDeLinea(b, pi) === cap)) total -= (pi.cant || 0);
+    });
   });
   return total;
+}
+
+/* Código Auranet: el guardado en el ítem; si no hay y la bolsa está vinculada a un proyecto,
+   el del proveedor elegido en el catálogo. */
+function bolsaAuranet(b, it) {
+  if (!it) return "";
+  if (it.codAuranet) return it.codAuranet;
+  var p = b.proyectoId ? Store.leer(b.proyectoId) : null;
+  var cat = Catalogo.leer();
+  if (!cat || !cat.items) return "";
+  var of = ofertaDe(insumoDe(cat, it.cod, p), p);
+  return of && of.codAur ? String(of.codAur).trim() : "";
 }
 
 function bolsaSiguientePedido(b) {
@@ -23,10 +49,19 @@ function bolsaSiguientePedido(b) {
   return max + 1;
 }
 
-function bolsaItemPorCod(b, cod) {
-  var items = b.items || [];
-  for (var i = 0; i < items.length; i++) if (items[i].tipo === "it" && items[i].cod === cod) return items[i];
-  return null;
+/* Con cap: el ítem de ese capítulo (o el primero del código si ya no existe). Sin cap: el primero. */
+function bolsaItemPorCod(b, cod, cap) {
+  var items = b.items || [], primero = null;
+  for (var i = 0; i < items.length; i++) {
+    if (items[i].tipo !== "it" || items[i].cod !== cod) continue;
+    if (cap === undefined || cap === null || (items[i].capitulo || "") === cap) return items[i];
+    if (!primero) primero = items[i];
+  }
+  return primero;
+}
+
+function bolsaItemsPorCod(b, cod) {
+  return (b.items || []).filter(function (it) { return it.tipo === "it" && it.cod === cod; });
 }
 
 function bolsaResumen(b) {
@@ -39,7 +74,7 @@ function bolsaResumen(b) {
   });
   (b.pedidos || []).forEach(function (ped) {
     (ped.items || []).forEach(function (li) {
-      var it = bolsaItemPorCod(b, li.cod);
+      var it = bolsaItemPorCod(b, li.cod, li.cap);
       var precio = (li.precio || (it ? it.precio : 0)) || 0;
       var sub = (li.cant || 0) * precio;
       if (ped.tipo === "adicional") valorAdicional += sub;
@@ -53,7 +88,130 @@ function bolsaResumen(b) {
 
 /* ---- Importar Excel ---- */
 
-function importarBolsaExcel(buffer) {
+/* Busca la fila de encabezados de una hoja tipo bolsa: código, descripción, precio unitario y
+   cantidad total y/o columnas CAP1, CAP2... con la cantidad de cada capítulo. */
+function _bolsaEncabezados(sheet) {
+  if (!sheet || !sheet["!ref"]) return null;
+  var rng = XLSX.utils.decode_range(sheet["!ref"]);
+  for (var r = rng.s.r; r <= Math.min(rng.e.r, rng.s.r + 30); r++) {
+    var m = { caps: [], fila: r, s: rng.s.c, e: rng.e.r };
+    for (var c = rng.s.c; c <= rng.e.c; c++) {
+      var t = norm(_cellVal(sheet, r, c));
+      if (!t) continue;
+      var mc = /^cap(?:itulo)?(\d+)$/.exec(t);
+      if (mc) { m.caps.push({ c: c, n: Number(mc[1]) }); continue; }
+      if (m.precio === undefined && (t.indexOf("preciounit") === 0 || t === "vrunitario" || t === "valorunitario")) m.precio = c;
+      else if (t === "cantidadfinal") m.cantFinal = c;
+      else if (m.cant === undefined && (t === "canttotal" || t === "cantidadtotal" || t === "cantidad" || t === "cant")) m.cant = c;
+      else if (m.cod === undefined && (t === "codigolutec" || t === "codigo" || t === "cod" || t === "codigomaterial" || t === "codigosap")) m.cod = c;
+      else if (m.desc === undefined && (t.indexOf("descripcion") === 0 || t === "materiales" || t === "material")) m.desc = c;
+      else if (m.und === undefined && (t === "und" || t === "unidad" || t === "um" || t === "unid")) m.und = c;
+      else if (t === "codauranetarr") m.aurArr = c;
+      else if (m.aur === undefined && (t === "codauranet" || t === "codigoauranet")) m.aur = c;
+    }
+    if (m.cantFinal !== undefined) m.cant = m.cantFinal;
+    if (m.precio !== undefined && (m.caps.length || m.cant !== undefined)) {
+      if (m.cod === undefined) m.cod = rng.s.c;
+      if (m.desc === undefined) m.desc = m.cod + 1;
+      if (m.aurArr !== undefined) m.aur = m.aurArr;
+      return m;
+    }
+  }
+  return null;
+}
+
+/* Nombres de capítulo del presupuesto: filas cuyo ÍTEM es un entero (1, 2, 3...) en orden.
+   CAPn de la bolsa corresponde al n-ésimo capítulo. Solo se usa una hoja con exactamente
+   `total` capítulos; si no hay, los capítulos quedan como "CAP n" (mejor sin nombre que con uno errado). */
+function _bolsaNombresCap(wb, hojaBolsa, total) {
+  var mejor = [];
+  wb.SheetNames.forEach(function (n) {
+    if (n === hojaBolsa) return;
+    var sh = wb.Sheets[n];
+    if (!sh || !sh["!ref"]) return;
+    var rng = XLSX.utils.decode_range(sh["!ref"]);
+    var cItem = -1, cDesc = -1, r0 = -1;
+    for (var r = rng.s.r; r <= Math.min(rng.e.r, rng.s.r + 15) && r0 < 0; r++) {
+      for (var c = rng.s.c; c <= rng.e.c; c++) {
+        var t = norm(_cellVal(sh, r, c));
+        if (t === "item" && cItem < 0) cItem = c;
+        else if (t.indexOf("descripcion") === 0 && cDesc < 0) cDesc = c;
+      }
+      if (cItem >= 0 && cDesc >= 0) r0 = r; else { cItem = -1; cDesc = -1; }
+    }
+    if (r0 < 0) return;
+    var nombres = [];
+    for (var rr = r0 + 1; rr <= rng.e.r; rr++) {
+      var vi = _cellVal(sh, rr, cItem), vd = _cellVal(sh, rr, cDesc);
+      if (vi === null || vd === null || typeof vd !== "string" || !vd.trim()) continue;
+      if (!/^\d{1,3}(\.0+)?$/.test(String(vi).trim())) continue;
+      var nom = vd.trim().replace(/\s+/g, " ");
+      nombres.push(nom.length > 60 ? nom.slice(0, 57) + "..." : nom);
+    }
+    if (nombres.length === total && !mejor.length) mejor = nombres;
+  });
+  return mejor;
+}
+
+/* Hoja de bolsa en formato matriz (una fila por material, columnas CAPn con cantidades).
+   Devuelve los ítems agrupados por capítulo, o null si no encuentra una hoja así. */
+function _bolsaDesdeMatriz(wb) {
+  var orden = wb.SheetNames.slice().sort(function (a, b) {
+    var pa = /bolsa/i.test(a) ? 0 : /consolidado|inventario/i.test(a) ? 1 : 2;
+    var pb = /bolsa/i.test(b) ? 0 : /consolidado|inventario/i.test(b) ? 1 : 2;
+    return pa - pb;
+  });
+  var hoja = null, m = null;
+  /* Primero una hoja con columnas de capítulo; si ninguna tiene, la primera con cantidad total */
+  for (var pase = 0; pase < 2 && !m; pase++) {
+    for (var i = 0; i < orden.length; i++) {
+      var det = _bolsaEncabezados(wb.Sheets[orden[i]]);
+      if (det && (pase === 1 || det.caps.length)) { hoja = orden[i]; m = det; break; }
+    }
+  }
+  if (!m) return null;
+  var sheet = wb.Sheets[hoja];
+  var maxCap = m.caps.reduce(function (s, k) { return Math.max(s, k.n); }, 0);
+  var nombres = maxCap ? _bolsaNombresCap(wb, hoja, maxCap) : [];
+  var txt = function (r, c) { var v = c === undefined ? null : _cellVal(sheet, r, c); return v === null ? "" : String(v).trim(); };
+  var num = function (r, c) { return c === undefined ? 0 : (Number(_cellVal(sheet, r, c)) || 0); };
+
+  var grupos = {}, ordenGrupos = [];
+  function agregar(cap, base, cant) {
+    if (!grupos[cap]) { grupos[cap] = { items: [], porCod: {} }; ordenGrupos.push(cap); }
+    var g = grupos[cap];
+    if (g.porCod[base.cod]) { g.porCod[base.cod].cantTotal += cant; return; }
+    var it = { tipo: "it", cod: base.cod, desc: base.desc, cantTotal: cant, precio: base.precio,
+               und: base.und, capitulo: cap, codAuranet: base.codAuranet };
+    g.porCod[base.cod] = it; g.items.push(it);
+  }
+  var etiquetaCap = function (n) { return "CAP " + n + (nombres[n - 1] ? " - " + nombres[n - 1] : ""); };
+  /* Los capítulos aparecen en el orden de las columnas */
+  m.caps.forEach(function (k) { var e = etiquetaCap(k.n); if (!grupos[e]) { grupos[e] = { items: [], porCod: {} }; ordenGrupos.push(e); } });
+
+  for (var r = m.fila + 1; r <= m.e; r++) {
+    var cod = txt(r, m.cod), desc = txt(r, m.desc);
+    if (!cod || !desc) continue;
+    var base = { cod: cod, desc: desc, precio: num(r, m.precio), und: txt(r, m.und), codAuranet: txt(r, m.aur) };
+    var enCaps = 0;
+    m.caps.forEach(function (k) {
+      var q = num(r, k.c);
+      if (q) { agregar(etiquetaCap(k.n), base, q); enCaps += q; }
+    });
+    if (!enCaps && num(r, m.cant)) agregar(m.caps.length ? "Sin capítulo" : "", base, num(r, m.cant));
+  }
+
+  var items = [];
+  ordenGrupos.forEach(function (cap) {
+    var g = grupos[cap];
+    if (!g.items.length) return;
+    if (cap) items.push({ tipo: "sub", desc: cap });
+    items.push.apply(items, g.items);
+  });
+  return items;
+}
+
+function importarBolsaExcel(buffer, nombreArchivo) {
   var wb = XLSX.read(buffer, { type: "array" });
   var bolsa = {
     id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
@@ -62,6 +220,15 @@ function importarBolsaExcel(buffer) {
     modificado: new Date().toISOString(),
     items: [], pedidos: []
   };
+
+  /* Formato propio (Membrete / Inventario / Pedidos_Historial) o bolsa en matriz con CAP1, CAP2... */
+  if (!wb.Sheets["Inventario"] && !wb.Sheets["Membrete"]) {
+    var itemsMatriz = _bolsaDesdeMatriz(wb);
+    if (!itemsMatriz || !itemsMatriz.length) throw new Error("No se encontró una hoja de bolsa con columnas de código, descripción, precio unitario y cantidad o capítulos (CAP1, CAP2...).");
+    bolsa.items = itemsMatriz;
+    bolsa.nombre = String(nombreArchivo || "").replace(/\.[^.]+$/, "") || ("Bolsa importada " + new Date().toISOString().slice(0, 10));
+    return bolsa;
+  }
 
   // Membrete
   var memb = wb.Sheets["Membrete"];
@@ -75,6 +242,7 @@ function importarBolsaExcel(buffer) {
   var inv = wb.Sheets["Inventario"] || wb.Sheets[wb.SheetNames[1]];
   if (inv) {
     var rango = XLSX.utils.decode_range(inv["!ref"] || "A1");
+    var subActual = "";
     for (var r = 2; r <= rango.e.r; r++) {
       var cB = inv[XLSX.utils.encode_cell({ r: r, c: 1 })];
       var cC = inv[XLSX.utils.encode_cell({ r: r, c: 2 })];
@@ -89,6 +257,7 @@ function importarBolsaExcel(buffer) {
       // Subtítulo: solo tiene col B (texto largo, sin código numérico)
       if (valB && !valC && !/^\d+$/.test(valB.replace(/[.\-]/g, ""))) {
         bolsa.items.push({ tipo: "sub", desc: valB });
+        subActual = valB;
         continue;
       }
       // Ítem normal
@@ -99,7 +268,7 @@ function importarBolsaExcel(buffer) {
         cantTotal: cD ? Number(cD.v) || 0 : 0,
         precio: cE ? Number(cE.v) || 0 : 0,
         und: cG ? String(cG.v || "") : "",
-        capitulo: cH ? String(cH.v || "") : "",
+        capitulo: (cH && String(cH.v || "").trim()) || subActual,
         codAuranet: cI ? String(cI.v || "") : ""
       });
     }
@@ -253,7 +422,7 @@ function enlazarBolsaLista() {
     var reader = new FileReader();
     reader.onload = function (ev) {
       try {
-        var bolsa = importarBolsaExcel(new Uint8Array(ev.target.result));
+        var bolsa = importarBolsaExcel(new Uint8Array(ev.target.result), f.name);
         Bolsas.guardar(bolsa);
         avisoOk("Bolsa \"" + bolsa.nombre + "\" importada con " + bolsa.items.filter(function (i) { return i.tipo === "it"; }).length + " items.");
         render();
@@ -427,7 +596,7 @@ function renderBolsaInventario(b) {
     }
     if (q && (it.cod || "").toLowerCase().indexOf(q) < 0 && (it.desc || "").toLowerCase().indexOf(q) < 0) return;
     visibles++;
-    var disp = bolsaDisponible(b, it.cod);
+    var disp = bolsaDisponible(b, it.cod, it.capitulo || "");
     var pct = it.cantTotal > 0 ? disp / it.cantTotal : 1;
     var color = pct > 0.3 ? "var(--ok,#2e7d32)" : pct > 0 ? "#e65100" : "#c00";
     var checked = sel.indexOf(i) >= 0 ? " checked" : "";
@@ -440,7 +609,7 @@ function renderBolsaInventario(b) {
       '<td class="num">' + cop((it.cantTotal || 0) * (it.precio || 0)) + '</td>' +
       '<td class="m">' + esc(it.und) + '</td>' +
       '<td class="m">' + esc(it.capitulo) + '</td>' +
-      '<td class="m">' + esc(it.codAuranet) + '</td>' +
+      '<td class="m">' + esc(bolsaAuranet(b, it)) + '</td>' +
       '<td class="num" style="color:' + color + ';font-weight:600">' + fmt(disp) + '</td>' +
       '<td style="text-align:center"><button class="btnx" data-editinv="' + i + '" title="Editar">&#9998;</button>' +
         '<button class="btnx" data-delinv="' + i + '" title="Quitar" style="color:#c00;margin-left:4px">&times;</button></td>' +
@@ -510,7 +679,7 @@ function renderBolsaInventario(b) {
   if (envBtn) envBtn.onclick = function () {
     vista.bolsaPrePedido = sel.map(function (i) {
       var it = b.items[i];
-      return it ? { cod: it.cod, desc: it.desc, precio: it.precio, und: it.und } : null;
+      return it ? { cod: it.cod, cap: it.capitulo || "" } : null;
     }).filter(function (x) { return x && x.cod; });
     vista.bolsaSelInv = [];
     ir({ bolsaPaso: "pedido" });
@@ -593,12 +762,12 @@ function renderBolsaPedido(b) {
 
     '<div class="card"><div class="chd"><span class="ct">Items del pedido</span></div><div class="cbd">' +
       '<table class="tbl" id="tblPedItems"><thead><tr>' +
-        '<th style="width:100px">Código</th><th>Descripción</th><th style="width:60px">Und</th>' +
+        '<th style="width:100px">Código</th><th style="width:160px">Capítulo</th><th>Descripción</th><th style="width:60px">Und</th>' +
         '<th style="width:70px" class="num">Disp.</th><th style="width:80px" class="num">Cantidad</th>' +
         '<th style="width:100px" class="num">Precio</th><th style="width:100px" class="num">Subtotal</th>' +
         '<th style="width:80px">Obs.</th><th style="width:40px"></th>' +
       '</tr></thead><tbody id="pedBody"></tbody>' +
-      '<tfoot><tr><td colspan="6" style="text-align:right;font-weight:600">Total:</td>' +
+      '<tfoot><tr><td colspan="7" style="text-align:right;font-weight:600">Total:</td>' +
         '<td class="num" id="pedTotal" style="font-weight:700">$0</td><td colspan="2"></td></tr></tfoot></table>' +
       '<div class="btnrow" style="margin-top:10px">' +
         '<button class="btn" id="pedAddRow">+ Agregar línea</button>' +
@@ -612,7 +781,7 @@ function renderBolsaPedido(b) {
   // Pre-llenar desde checkboxes de inventario
   var lineas;
   if (vista.bolsaPrePedido && vista.bolsaPrePedido.length) {
-    lineas = vista.bolsaPrePedido.map(function (x) { return { cod: x.cod, cant: 0, obs: "" }; });
+    lineas = vista.bolsaPrePedido.map(function (x) { return { cod: x.cod, cap: x.cap, cant: 0, obs: "" }; });
     vista.bolsaPrePedido = null;
   } else {
     lineas = [{ cod: "", cant: 0, obs: "" }];
@@ -632,7 +801,9 @@ function renderBolsaPedido(b) {
     var total = 0;
     body.innerHTML = lineas.map(function (l, i) {
       var esExtra = l.cod && (l.cod.indexOf("AD_") === 0 || l.cod.indexOf("OS_") === 0);
-      var it = esExtra ? null : bolsaItemPorCod(b, l.cod);
+      var opciones = esExtra ? [] : bolsaItemsPorCod(b, l.cod);
+      if (opciones.length && !opciones.some(function (o) { return (o.capitulo || "") === l.cap; })) l.cap = opciones[0].capitulo || "";
+      var it = esExtra ? null : bolsaItemPorCod(b, l.cod, l.cap);
       var precio = esExtra ? (l.precio || 0) : (it ? (it.precio || 0) : 0);
       var sub = (l.cant || 0) * precio;
       total += sub;
@@ -640,6 +811,7 @@ function renderBolsaPedido(b) {
       if (esExtra) {
         return '<tr style="background:#fff8e1">' +
           '<td><input class="in m" data-pedcod="' + i + '" value="' + esc(l.cod) + '" readonly style="width:90px;background:#eee"></td>' +
+          '<td style="color:var(--ink3)">—</td>' +
           '<td><input class="in" data-peddesc="' + i + '" value="' + esc(l.desc || "") + '" placeholder="Descripción"></td>' +
           '<td><input class="in m" data-pedund="' + i + '" value="' + esc(l.und || "UND") + '" style="width:50px"></td>' +
           '<td class="num" style="color:var(--ink3)">N/A</td>' +
@@ -651,9 +823,17 @@ function renderBolsaPedido(b) {
         '</tr>';
       }
 
-      var disp = it ? bolsaDisponible(b, l.cod) : 0;
+      var disp = it ? bolsaDisponible(b, l.cod, l.cap || "") : 0;
+      var celdaCap = opciones.length > 1
+        ? '<select class="in" data-pedcap="' + i + '" style="font-size:12px">' + opciones.map(function (o) {
+            var c = o.capitulo || "";
+            return '<option value="' + esc(c) + '"' + (c === l.cap ? " selected" : "") + '>' +
+              esc(c || "Sin capítulo") + ' (disp. ' + fmt(bolsaDisponible(b, l.cod, c)) + ')</option>';
+          }).join("") + '</select>'
+        : '<span style="font-size:12px">' + esc(it ? (it.capitulo || "") : "") + '</span>';
       return '<tr>' +
         '<td><input class="in m" data-pedcod="' + i + '" value="' + esc(l.cod) + '" placeholder="Código" list="dlCods"></td>' +
+        '<td>' + celdaCap + '</td>' +
         '<td style="font-size:12px">' + (it ? esc(it.desc) : '<span style="color:var(--ink3)">—</span>') + '</td>' +
         '<td class="m">' + (it ? esc(it.und) : "") + '</td>' +
         '<td class="num">' + (it ? fmt(disp) : "—") + '</td>' +
@@ -668,12 +848,19 @@ function renderBolsaPedido(b) {
 
     var dl = document.getElementById("dlCods");
     if (!dl) { dl = document.createElement("datalist"); dl.id = "dlCods"; document.body.appendChild(dl); }
-    dl.innerHTML = (b.items || []).filter(function (it) { return it.tipo === "it"; }).map(function (it) {
+    var vistosDl = {};
+    dl.innerHTML = (b.items || []).filter(function (it) {
+      if (it.tipo !== "it" || vistosDl[it.cod]) return false;
+      return (vistosDl[it.cod] = true);
+    }).map(function (it) {
       return '<option value="' + esc(it.cod) + '">' + esc(it.desc) + '</option>';
     }).join("");
 
     Array.prototype.forEach.call(document.querySelectorAll("[data-pedcod]"), function (inp) {
-      inp.onchange = function () { lineas[Number(inp.dataset.pedcod)].cod = inp.value.trim(); redibujarLineas(); };
+      inp.onchange = function () { var l = lineas[Number(inp.dataset.pedcod)]; l.cod = inp.value.trim(); l.cap = undefined; redibujarLineas(); };
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-pedcap]"), function (sel) {
+      sel.onchange = function () { lineas[Number(sel.dataset.pedcap)].cap = sel.value; redibujarLineas(); };
     });
     Array.prototype.forEach.call(document.querySelectorAll("[data-pedcant]"), function (inp) {
       inp.onchange = function () { lineas[Number(inp.dataset.pedcant)].cant = Number(inp.value) || 0; redibujarLineas(); };
@@ -725,8 +912,8 @@ function renderBolsaPedido(b) {
       var warn = [];
       itemsVal.forEach(function (l) {
         if (l.cod.indexOf("AD_") === 0 || l.cod.indexOf("OS_") === 0) return;
-        var disp = bolsaDisponible(b, l.cod);
-        if (l.cant > disp) warn.push(l.cod + " (pide " + l.cant + ", disp " + fmt(disp) + ")");
+        var disp = bolsaDisponible(b, l.cod, l.cap || "");
+        if (l.cant > disp) warn.push(l.cod + (l.cap ? " [" + l.cap + "]" : "") + " (pide " + l.cant + ", disp " + fmt(disp) + ")");
       });
       if (warn.length && !confirm("Estos ítems exceden el disponible:\n" + warn.join("\n") + "\n\n¿Registrar de todos modos?")) return;
     }
@@ -737,6 +924,8 @@ function renderBolsaPedido(b) {
         base.desc = l.desc || "";
         base.precio = l.precio || 0;
         base.und = l.und || "UND";
+      } else {
+        base.cap = l.cap || "";
       }
       return base;
     });
@@ -780,7 +969,7 @@ function renderBolsaHistorial(b) {
     if (ped.num !== prevNum) {
       prevNum = ped.num;
       filas += '<tr style="background:var(--bg2)">' +
-        '<td colspan="8" style="font-weight:600;padding:8px 6px">' +
+        '<td colspan="9" style="font-weight:600;padding:8px 6px">' +
           'Pedido #' + ped.num + ' — ' + esc(ped.fecha) + ' — ' + esc(ped.tipo || "obra") +
           (ped.solicitante ? ' — ' + esc(ped.solicitante) : '') +
         '</td>' +
@@ -794,7 +983,7 @@ function renderBolsaHistorial(b) {
     (ped.items || []).forEach(function (li) {
       if (qh && (li.cod || "").toLowerCase().indexOf(qh) < 0 && (ped.solicitante || "").toLowerCase().indexOf(qh) < 0) return;
       var esExtra = li.cod && (li.cod.indexOf("AD_") === 0 || li.cod.indexOf("OS_") === 0);
-      var it = esExtra ? null : bolsaItemPorCod(b, li.cod);
+      var it = esExtra ? null : bolsaItemPorCod(b, li.cod, li.cap);
       var desc = esExtra ? (li.desc || li.cod) : (it ? it.desc : "—");
       var precio = esExtra ? (li.precio || 0) : (it ? it.precio : 0);
       filas += '<tr>' +
@@ -802,6 +991,7 @@ function renderBolsaHistorial(b) {
         '<td class="m">' + esc(ped.fecha) + '</td>' +
         '<td>' + esc(ped.solicitante) + '</td>' +
         '<td class="m">' + esc(li.cod) + (esExtra ? ' <span style="color:#e65100;font-size:10px">' + ped.tipo.toUpperCase().slice(0,3) + '</span>' : '') + '</td>' +
+        '<td style="font-size:11px">' + esc(esExtra ? "" : bolsaCapDeLinea(b, li)) + '</td>' +
         '<td style="font-size:12px">' + esc(desc) + '</td>' +
         '<td class="num">' + fmt(li.cant) + '</td>' +
         '<td class="num">' + cop(precio) + '</td>' +
@@ -812,7 +1002,7 @@ function renderBolsaHistorial(b) {
     });
   });
 
-  if (!filas) filas = '<tr><td colspan="10" style="text-align:center;color:var(--ink3);padding:20px">Sin pedidos registrados.</td></tr>';
+  if (!filas) filas = '<tr><td colspan="11" style="text-align:center;color:var(--ink3);padding:20px">Sin pedidos registrados.</td></tr>';
 
   app.innerHTML = barraTop("bolsas") +
     '<header class="top"><div class="wrap topin"><div>' +
@@ -826,7 +1016,7 @@ function renderBolsaHistorial(b) {
       '<input class="in infiltro" id="filtBolsaHist" placeholder="Filtrar por código o solicitante" value="' + esc(vista.filtBolsaHist || "") + '">' +
       '<div class="scroll" style="margin-top:10px"><table class="tbl"><thead><tr>' +
         '<th style="width:40px">#</th><th style="width:90px">Fecha</th><th>Solicitante</th>' +
-        '<th style="width:80px">Código</th><th>Descripción</th>' +
+        '<th style="width:80px">Código</th><th style="width:120px">Capítulo</th><th>Descripción</th>' +
         '<th style="width:60px" class="num">Cant.</th><th style="width:80px" class="num">Precio</th>' +
         '<th style="width:90px" class="num">Subtotal</th><th style="width:70px">Tipo</th>' +
         '<th>Obs.</th>' +
@@ -858,12 +1048,11 @@ function renderBolsaResumen(b) {
   var items = (b.items || []).filter(function (it) { return it.tipo === "it"; });
   var totalPedInv = 0, totalDisp = 0;
   var filas = items.map(function (it) {
-    var totalPed = 0;
-    (b.pedidos || []).forEach(function (ped) {
-      if (ped.tipo === "adicional" || ped.tipo === "omision") return;
-      (ped.items || []).forEach(function (li) { if (li.cod === it.cod) totalPed += (li.cant || 0); });
-    });
-    var disp = (it.cantTotal || 0) - totalPed;
+    var cap = it.capitulo || "";
+    var disp = bolsaDisponible(b, it.cod, cap);
+    /* Si el mismo código+capítulo está repetido, lo pedido se reparte entre las filas: se muestra el total */
+    var inicialCap = bolsaItemsPorCod(b, it.cod).reduce(function (s, x) { return (x.capitulo || "") === cap ? s + (x.cantTotal || 0) : s; }, 0);
+    var totalPed = inicialCap - disp;
     var valorPed = totalPed * (it.precio || 0);
     totalPedInv += valorPed;
     totalDisp += disp * (it.precio || 0);
@@ -872,6 +1061,7 @@ function renderBolsaResumen(b) {
     var color = pct > 0.3 ? "var(--ok,#2e7d32)" : pct > 0 ? "#e65100" : "#c00";
     return '<tr>' +
       '<td class="m">' + esc(it.cod) + '</td>' +
+      '<td style="font-size:11px">' + esc(cap) + '</td>' +
       '<td style="font-size:12px">' + esc(it.desc) + '</td>' +
       '<td class="num">' + fmt(it.cantTotal) + '</td>' +
       '<td class="num">' + fmt(totalPed) + '</td>' +
@@ -924,7 +1114,7 @@ function renderBolsaResumen(b) {
     '</div></div>' +
     '<div class="card"><div class="chd"><span class="ct">Resumen por ítem (inventario)</span></div><div class="cbd">' +
       '<div class="scroll"><table class="tbl"><thead><tr>' +
-        '<th style="width:80px">Código</th><th>Descripción</th>' +
+        '<th style="width:80px">Código</th><th style="width:120px">Capítulo</th><th>Descripción</th>' +
         '<th style="width:65px" class="num">Inicial</th><th style="width:65px" class="num">Pedido</th>' +
         '<th style="width:65px" class="num">Disp.</th><th style="width:90px" class="num">Precio</th>' +
         '<th style="width:100px" class="num">Vr. pedidos</th><th style="width:80px">Estado</th>' +
@@ -1178,9 +1368,11 @@ function importarInventarioDesdeProyecto(b) {
       if (existentes[clave]) return;
       if (!acum[clave]) {
         var ins = insumoDe(cat, l.cod, p);
+        var of = ofertaDe(ins, p);
         acum[clave] = {
           cod: l.cod, desc: l.desc || "", und: l.und || "",
-          cantTotal: 0, precio: ins ? (Number(ins.precio) || 0) : 0, capitulo: cap
+          cantTotal: 0, precio: ins ? (Number(ins.precio) || 0) : 0, capitulo: cap,
+          codAuranet: of && of.codAur ? String(of.codAur).trim() : ""
         };
       }
       acum[clave].cantTotal += l.cant * cantAnexo;
@@ -1193,7 +1385,7 @@ function importarInventarioDesdeProyecto(b) {
     var a = acum[k];
     b.items.push({
       tipo: "it", cod: a.cod, desc: a.desc, und: a.und,
-      cantTotal: a.cantTotal, precio: a.precio, capitulo: a.capitulo, codAuranet: ""
+      cantTotal: a.cantTotal, precio: a.precio, capitulo: a.capitulo, codAuranet: a.codAuranet
     });
     nuevos++;
   });
@@ -1394,8 +1586,7 @@ function renderBolsaApus(b) {
     cuerpo += datos.apus.map(function (a) {
       var filas = a.insumos.filter(function (i) { return i.enBolsa; }).map(function (i) {
         var disp = bolsaDisponible(b, i.cod);
-        var bItem = bolsaItemPorCod(b, i.cod);
-        var enBolsa = bItem ? (bItem.cantTotal || 0) : 0;
+        var enBolsa = bolsaItemsPorCod(b, i.cod).reduce(function (s, x) { return s + (x.cantTotal || 0); }, 0);
         var color = disp > 0 ? "var(--ok,#2e7d32)" : "#c00";
         return '<tr>' +
           '<td class="m">' + esc(i.cod) + '</td>' +
@@ -1441,14 +1632,14 @@ function imprimirPedido(b, numPedido) {
   var subtotal = 0;
   (ped.items || []).forEach(function (li, idx) {
     var esExtra = li.cod && (li.cod.indexOf("AD_") === 0 || li.cod.indexOf("OS_") === 0);
-    var it = esExtra ? null : bolsaItemPorCod(b, li.cod);
+    var it = esExtra ? null : bolsaItemPorCod(b, li.cod, li.cap);
     var desc = esExtra ? (li.desc || li.cod) : (it ? it.desc : li.cod);
     var und = esExtra ? (li.und || "UND") : (it ? it.und : "");
     var precio = esExtra ? (li.precio || 0) : (it ? it.precio : 0);
     var costoT = (li.cant || 0) * precio;
     subtotal += costoT;
-    var cap = it ? (it.capitulo || "") : "";
-    var aura = it ? (it.codAuranet || "") : "";
+    var cap = esExtra ? "" : bolsaCapDeLinea(b, li);
+    var aura = bolsaAuranet(b, it);
     filas += '<tr><td>' + (idx + 1) + '</td><td style="text-align:left">' + e(desc) + '</td>' +
       '<td>' + e(und) + '</td><td class="r">' + n(li.cant) + '</td>' +
       '<td class="r">' + m(precio) + '</td><td class="r">' + m(costoT) + '</td>' +
@@ -1507,7 +1698,7 @@ function imprimirPedido(b, numPedido) {
       '<th style="width:30px">ITEM</th><th>DESCRIPCIÓN</th><th style="width:50px">UND</th>' +
       '<th style="width:55px">CANT.</th><th style="width:70px">COSTO UNT.</th>' +
       '<th style="width:75px">COSTO TOTAL</th><th style="width:70px">OBS.</th>' +
-      '<th style="width:60px">CAPÍTULO</th><th style="width:65px">COD. AURANET</th>' +
+      '<th style="width:120px">CAPÍTULO</th><th style="width:65px">COD. AURANET</th>' +
     '</tr></thead><tbody>' + filas + '</tbody>' +
     '<tfoot>' +
       '<tr class="tot"><td colspan="5" style="text-align:right">SUB TOTAL:</td><td>' + m(subtotal) + '</td><td colspan="3"></td></tr>' +
@@ -1545,7 +1736,7 @@ function exportarPedidoExcel(b, numPedido) {
 
   ws.columns = [
     { width: 5 }, { width: 35 }, { width: 8 }, { width: 10 },
-    { width: 14 }, { width: 14 }, { width: 12 }, { width: 12 }, { width: 12 }
+    { width: 14 }, { width: 14 }, { width: 12 }, { width: 28 }, { width: 14 }
   ];
 
   var fillN = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } };
@@ -1609,12 +1800,12 @@ function exportarPedidoExcel(b, numPedido) {
   for (var ii = 0; ii < pedItems.length; ii++) {
     var li = pedItems[ii];
     var esExtra = li.cod && (li.cod.indexOf("AD_") === 0 || li.cod.indexOf("OS_") === 0);
-    var it = esExtra ? null : bolsaItemPorCod(b, li.cod);
+    var it = esExtra ? null : bolsaItemPorCod(b, li.cod, li.cap);
     var desc = esExtra ? (li.desc || li.cod) : (it ? it.desc : li.cod);
     var und = esExtra ? (li.und || "UND") : (it ? it.und : "");
     var precio = esExtra ? (li.precio || 0) : (it ? it.precio : 0);
-    var cap = it ? (it.capitulo || "") : "";
-    var aura = it ? (it.codAuranet || "") : "";
+    var cap = esExtra ? "" : bolsaCapDeLinea(b, li);
+    var aura = bolsaAuranet(b, it);
     var rr = ws.getRow(dataStart + ii);
     rr.getCell(1).value = ii + 1;
     rr.getCell(2).value = desc;
