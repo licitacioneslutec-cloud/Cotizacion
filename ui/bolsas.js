@@ -64,6 +64,38 @@ function bolsaItemsPorCod(b, cod) {
   return (b.items || []).filter(function (it) { return it.tipo === "it" && it.cod === cod; });
 }
 
+/* Antes de mover capítulos, las líneas antiguas (sin cap) quedan fijas en el capítulo que hoy les toca */
+function _bolsaFijarCapLineas(b) {
+  (b.pedidos || []).forEach(function (ped) {
+    if (ped.tipo === "adicional" || ped.tipo === "omision") return;
+    (ped.items || []).forEach(function (li) { if (li.cap === undefined || li.cap === null) li.cap = bolsaCapDeLinea(b, li); });
+  });
+}
+
+/* Renombra un capítulo en ítems, subtítulos y líneas de pedido */
+function bolsaRenombrarCap(b, viejo, nuevo) {
+  _bolsaFijarCapLineas(b);
+  (b.items || []).forEach(function (it) {
+    if (it.tipo === "it" && (it.capitulo || "") === viejo) it.capitulo = nuevo;
+    if (it.tipo === "sub" && it.desc === viejo) it.desc = nuevo;
+  });
+  (b.pedidos || []).forEach(function (ped) {
+    (ped.items || []).forEach(function (li) { if (li.cap === viejo) li.cap = nuevo; });
+  });
+}
+
+/* Mueve un solo ítem a otro capítulo; sus pedidos lo siguen si ya no queda ese código en el capítulo viejo */
+function bolsaMoverItemCap(b, it, nuevo) {
+  _bolsaFijarCapLineas(b);
+  var viejo = it.capitulo || "";
+  it.capitulo = nuevo;
+  var queda = bolsaItemsPorCod(b, it.cod).some(function (x) { return (x.capitulo || "") === viejo; });
+  if (queda) return;
+  (b.pedidos || []).forEach(function (ped) {
+    (ped.items || []).forEach(function (li) { if (li.cod === it.cod && li.cap === viejo) li.cap = nuevo; });
+  });
+}
+
 function bolsaResumen(b) {
   var totalItems = 0, valorInv = 0, pedidos = (b.pedidos || []).length;
   var valorPedInv = 0, valorAdicional = 0, valorOmision = 0;
@@ -591,7 +623,8 @@ function renderBolsaInventario(b) {
   var visibles = 0;
   (b.items || []).forEach(function (it, i) {
     if (it.tipo === "sub") {
-      filas += '<tr style="background:var(--bg2)"><td colspan="11" style="font-weight:700;padding:8px 6px">' + esc(it.desc) + '</td></tr>';
+      filas += '<tr style="background:var(--bg2)"><td colspan="11" style="padding:6px">' +
+        '<input class="in" data-subinv="' + i + '" value="' + esc(it.desc) + '" title="Nombre del capítulo" style="font-weight:700"></td></tr>';
       return;
     }
     if (q && (it.cod || "").toLowerCase().indexOf(q) < 0 && (it.desc || "").toLowerCase().indexOf(q) < 0) return;
@@ -604,12 +637,12 @@ function renderBolsaInventario(b) {
       '<td style="width:30px;text-align:center"><input type="checkbox" data-selinv="' + i + '"' + checked + '></td>' +
       '<td class="m">' + esc(it.cod) + '</td>' +
       '<td>' + esc(it.desc) + '</td>' +
-      '<td class="num">' + fmt(it.cantTotal) + '</td>' +
+      '<td><input class="in m" type="number" min="0" step="any" data-cantinv="' + i + '" value="' + (it.cantTotal || 0) + '" style="width:80px;text-align:right"></td>' +
       '<td class="num">' + cop(it.precio) + '</td>' +
       '<td class="num">' + cop((it.cantTotal || 0) * (it.precio || 0)) + '</td>' +
       '<td class="m">' + esc(it.und) + '</td>' +
-      '<td class="m">' + esc(it.capitulo) + '</td>' +
-      '<td class="m">' + esc(bolsaAuranet(b, it)) + '</td>' +
+      '<td><input class="in" data-capinv="' + i + '" value="' + esc(it.capitulo || "") + '" list="dlCapsInv" style="font-size:12px;min-width:130px"></td>' +
+      '<td><input class="in m" data-aurinv="' + i + '" value="' + esc(bolsaAuranet(b, it)) + '" style="width:80px"></td>' +
       '<td class="num" style="color:' + color + ';font-weight:600">' + fmt(disp) + '</td>' +
       '<td style="text-align:center"><button class="btnx" data-editinv="' + i + '" title="Editar">&#9998;</button>' +
         '<button class="btnx" data-delinv="' + i + '" title="Quitar" style="color:#c00;margin-left:4px">&times;</button></td>' +
@@ -635,13 +668,16 @@ function renderBolsaInventario(b) {
       '<div class="scroll" style="margin-top:10px"><table class="tbl"><thead><tr>' +
         '<th style="width:30px"><input type="checkbox" id="selAllInv"></th>' +
         '<th style="width:80px">Código</th><th>Descripción</th>' +
-        '<th style="width:70px" class="num">Cant.</th>' +
+        '<th style="width:90px" class="num">Cant.</th>' +
         '<th style="width:90px" class="num">Precio</th>' +
         '<th style="width:100px" class="num">Valor</th>' +
-        '<th style="width:50px">Und</th><th style="width:70px">Cap.</th>' +
-        '<th style="width:80px">Auranet</th>' +
+        '<th style="width:50px">Und</th><th style="width:150px">Cap.</th>' +
+        '<th style="width:90px">Auranet</th>' +
         '<th style="width:70px" class="num">Disp.</th><th style="width:60px"></th>' +
       '</tr></thead><tbody>' + filas + '</tbody></table></div>' +
+      '<datalist id="dlCapsInv">' + Object.keys((b.items || []).reduce(function (o, x) {
+        if (x.tipo === "it" && x.capitulo) o[x.capitulo] = 1; return o; }, {})).map(function (c) {
+        return '<option value="' + esc(c) + '">'; }).join("") + '</datalist>' +
       '<div class="btnrow" style="margin-top:12px">' +
         '<button class="btn" id="bolAddItem">+ Agregar ítem</button>' +
         '<button class="btn" id="bolAddSub" style="margin-left:8px">+ Subtítulo</button>' +
@@ -711,11 +747,51 @@ function renderBolsaInventario(b) {
       var nd = prompt("Descripción:", it.desc);
       if (nd === null) return;
       it.desc = nd;
-      var nc = prompt("Cantidad total:", it.cantTotal);
-      if (nc !== null) it.cantTotal = Number(nc) || 0;
       var np = prompt("Precio unitario:", it.precio);
       if (np !== null) it.precio = Number(np) || 0;
       Bolsas.guardar(b); render();
+    };
+  });
+
+  /* Edición en línea: se guarda al salir del campo (change), no mientras se escribe */
+  var conScroll = function (fn) { var y = window.scrollY; fn(); window.scrollTo(0, y); };
+  Array.prototype.forEach.call(document.querySelectorAll("[data-cantinv]"), function (inp) {
+    inp.onchange = function () {
+      var it = b.items[Number(inp.dataset.cantinv)]; if (!it) return;
+      it.cantTotal = Number(inp.value) || 0;
+      Bolsas.guardar(b); conScroll(render);
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-aurinv]"), function (inp) {
+    inp.onchange = function () {
+      var it = b.items[Number(inp.dataset.aurinv)]; if (!it) return;
+      it.codAuranet = inp.value.trim();
+      Bolsas.guardar(b);
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-capinv]"), function (inp) {
+    inp.onchange = function () {
+      var it = b.items[Number(inp.dataset.capinv)]; if (!it) return;
+      var viejo = it.capitulo || "", nuevo = inp.value.trim();
+      if (nuevo === viejo) return;
+      var n = (b.items || []).filter(function (x) { return x.tipo === "it" && (x.capitulo || "") === viejo; }).length;
+      if (viejo && n > 1 && confirm("¿Renombrar el capítulo «" + viejo + "» a «" + nuevo + "» en sus " + n +
+          " ítems y pedidos?\n\nAceptar = todo el capítulo\nCancelar = mover solo este ítem")) {
+        bolsaRenombrarCap(b, viejo, nuevo);
+      } else {
+        bolsaMoverItemCap(b, it, nuevo);
+      }
+      Bolsas.guardar(b); conScroll(render);
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-subinv]"), function (inp) {
+    inp.onchange = function () {
+      var sub = b.items[Number(inp.dataset.subinv)]; if (!sub) return;
+      var nuevo = inp.value.trim();
+      if (!nuevo || nuevo === sub.desc) { inp.value = sub.desc; return; }
+      bolsaRenombrarCap(b, sub.desc, nuevo);
+      sub.desc = nuevo;
+      Bolsas.guardar(b); conScroll(render);
     };
   });
 
@@ -1280,29 +1356,53 @@ function _extraerApuExcel(sheet) {
     if (sk.indexOf("ITEM") < 0 || sk.indexOf(":") < 0) { r2++; continue; }
     r2++;
     if (r2 > rng.e.r) break;
+    var sv = function (r, c) { var v = _cellVal(sheet, r, c); return v != null ? String(v).trim() : ""; };
+    var nv = function (r, c) { return Number(_cellVal(sheet, r, c)) || 0; };
     var apuObj = {
       apu: Number(_cellVal(sheet, r2, bc)) || 0,
-      desc: String(_cellVal(sheet, r2, bc + 1) != null ? _cellVal(sheet, r2, bc + 1) : ""),
-      und: String(_cellVal(sheet, r2, bc + 2) != null ? _cellVal(sheet, r2, bc + 2) : ""),
-      cant: Number(_cellVal(sheet, r2, bc + 3)) || 0,
-      insumos: []
+      desc: sv(r2, bc + 1), und: sv(r2, bc + 2), cant: nv(r2, bc + 3),
+      insumos: [], lineas: [], transporte: 0, herramienta: 0, directo: 0
     };
+    /* Columnas de valores: se ubican por el encabezado de insumos; si no está, el orden usual */
+    var col = { unit: bc + 4, desp: bc + 5, total: bc + 6 };
+    var sec = "mat";
     r2++;
     while (r2 <= rng.e.r) {
-      var vi = _cellVal(sheet, r2, bc);
-      var si3 = vi != null ? String(vi).trim() : "";
+      var si3 = sv(r2, bc), d1 = sv(r2, bc + 1);
       if (si3.indexOf("ITEM") >= 0 && si3.indexOf(":") >= 0) break;
-      if (!si3 || si3 === "-" || /^I{1,3}\./.test(si3) ||
-          si3.toUpperCase().indexOf("CODIGO") >= 0 ||
-          si3.toUpperCase().indexOf("SUBTOTAL") >= 0 ||
-          si3.toUpperCase().indexOf("DESCRIPCI") >= 0) { r2++; continue; }
-      var cantVal = Number(_cellVal(sheet, r2, bc + 3)) || 0;
+      var n0 = norm(si3), n1 = norm(d1);
+      if (n0.indexOf("codigo") === 0) {
+        for (var cc = bc + 3; cc <= bc + 8; cc++) {
+          var th = norm(_cellVal(sheet, r2, cc));
+          if (th === "vrunit" || th === "vrunitario" || th === "preciounit" || th === "preciounitario") col.unit = cc;
+          else if (th.indexOf("desp") === 0) col.desp = cc;
+          else if (th === "vrtotal" || th === "valortotal" || th === "preciototal") col.total = cc;
+        }
+        r2++; continue;
+      }
+      /* Secciones: I. materiales, II. herramientas y transporte, III. mano de obra */
+      if (!si3 && /^i{1,3}\b/i.test(d1.replace(/[.\s·]+/g, " ").trim())) {
+        if (n1.indexOf("mano") >= 0) sec = "mo";
+        else if (n1.indexOf("herram") >= 0 || n1.indexOf("transp") >= 0) sec = "th";
+        else sec = "mat";
+        r2++; continue;
+      }
+      var etiq = norm(sv(r2, col.unit) || d1);
+      if (!si3 && etiq === "costodirecto") { apuObj.directo = nv(r2, col.total); r2++; continue; }
+      if (!si3 || si3 === "-") { r2++; continue; }
+      if (sec === "th") {
+        if (si3.toUpperCase() === "TR1") apuObj.transporte = nv(r2, col.total);
+        else if (si3.toUpperCase() === "HER1") apuObj.herramienta = nv(r2, col.total);
+        r2++; continue;
+      }
+      var cantVal = nv(r2, bc + 3);
       if (cantVal > 0) {
-        apuObj.insumos.push({
-          cod: si3,
-          desc: String(_cellVal(sheet, r2, bc + 1) != null ? _cellVal(sheet, r2, bc + 1) : ""),
-          und: String(_cellVal(sheet, r2, bc + 2) != null ? _cellVal(sheet, r2, bc + 2) : ""),
-          cant: cantVal
+        var desp = nv(r2, col.desp);
+        apuObj.insumos.push({ cod: si3, desc: d1, und: sv(r2, bc + 2), cant: cantVal });
+        apuObj.lineas.push({
+          cod: si3, desc: d1, und: sv(r2, bc + 2), cant: cantVal,
+          desp: desp > 0 && desp < 1 ? desp * 100 : desp,
+          precio: nv(r2, col.unit), total: nv(r2, col.total), mo: sec === "mo"
         });
       }
       r2++;
@@ -1450,15 +1550,21 @@ function cruzarDesdeProyecto(b, p, cat) {
       return { cod: l.cod, desc: l.desc || "", und: l.und || "",
         cantUnit: l.cant, cantNec: l.cant * cantAnexo, enBolsa: enBolsa };
     });
-    if (tieneCoincidencia) {
-      apus.push({
-        apu: a.apu,
-        desc: a.items[0] ? (a.items[0].desc || "APU " + a.apu) : "APU " + a.apu,
-        und: a.items[0] ? (a.items[0].und || "") : "",
-        cantAnexo: cantAnexo, cap: capPorApu[a.apu] || "Sin capítulo",
-        insumos: insumos
-      });
-    }
+    /* Mismos valores que "Cómo queda el análisis" en Apartados */
+    var val = valorizar(cat, comp.lineas, margenesDe(p, a.apu), p);
+    apus.push({
+      apu: a.apu,
+      desc: a.items[0] ? (a.items[0].desc || "APU " + a.apu) : "APU " + a.apu,
+      und: a.items[0] ? (a.items[0].und || "") : "",
+      cantAnexo: cantAnexo, cap: capPorApu[a.apu] || "Sin capítulo",
+      insumos: insumos, tieneCoincidencia: tieneCoincidencia,
+      lineas: val.lineas.map(function (l) {
+        return { cod: l.codVer || l.cod, desc: l.desc, und: l.und, cant: l.cant, desp: l.desp,
+                 precio: l.falta ? null : l.precio, total: l.falta ? null : l.total, mo: l.mo };
+      }),
+      mat: val.mat, transporte: val.transporte, herramienta: val.herramienta, th: val.th,
+      mo: val.mo, directo: val.directo
+    });
   });
 
   var coinPorApu = {};
@@ -1498,15 +1604,23 @@ function cruzarDesdeExcel(b) {
       return { cod: ins.cod, desc: ins.desc, und: ins.und,
         cantUnit: ins.cant, cantNec: ins.cant * cantAnexo, enBolsa: enBolsa };
     });
-    if (tieneCoincidencia) {
-      var cap = "Sin capítulo";
-      for (var pi = 0; pi < (b.presupuesto || []).length; pi++) {
-        if (b.presupuesto[pi].tipo === "cap") cap = b.presupuesto[pi].desc;
-        if (b.presupuesto[pi].tipo === "it" && b.presupuesto[pi].apu === a.apu) break;
-      }
-      apus.push({ apu: a.apu, desc: a.desc, und: a.und,
-        cantAnexo: cantAnexo, cap: cap, insumos: insumos });
+    var cap = "Sin capítulo";
+    for (var pi = 0; pi < (b.presupuesto || []).length; pi++) {
+      if (b.presupuesto[pi].tipo === "cap") cap = b.presupuesto[pi].desc;
+      if (b.presupuesto[pi].tipo === "it" && b.presupuesto[pi].apu === a.apu) break;
     }
+    /* APUs importados antes de leer valores: solo traen cantidades */
+    var lineas = a.lineas || a.insumos.map(function (ins) {
+      return { cod: ins.cod, desc: ins.desc, und: ins.und, cant: ins.cant, desp: 0, precio: null, total: null, mo: false };
+    });
+    var mat = 0, mo = 0;
+    lineas.forEach(function (l) { if (l.mo) mo += (l.total || 0); else mat += (l.total || 0); });
+    var transp = a.transporte || 0, herr = a.herramienta || 0;
+    apus.push({ apu: a.apu, desc: a.desc, und: a.und,
+      cantAnexo: cantAnexo || a.cant || 0, cap: cap, insumos: insumos, tieneCoincidencia: tieneCoincidencia,
+      sinValores: !a.lineas, lineas: lineas,
+      mat: mat, transporte: transp, herramienta: herr, th: transp + herr, mo: mo,
+      directo: a.directo || (mat + transp + herr + mo) });
   });
 
   return { presupuesto: presupuesto, apus: apus };
@@ -1574,41 +1688,61 @@ function renderBolsaApus(b) {
       '<div class="dropt">Sin datos de APUs</div>' +
       'Vincula un proyecto en la pestaña Ficha, o importa un Excel de presupuesto (Anexo N1 Oferta).</div></div>';
   } else {
-    var totalCoinciden = 0;
-    datos.apus.forEach(function (a) {
-      a.insumos.forEach(function (i) { if (i.enBolsa) totalCoinciden++; });
-    });
+    var valorTotal = datos.apus.reduce(function (s, a) { return s + a.directo * (a.cantAnexo || 0); }, 0);
+    var sinValores = datos.apus.some(function (a) { return a.sinValores; });
     cuerpo = '<div class="card"><div class="cbd" style="display:flex;gap:24px;flex-wrap:wrap">' +
-      '<div><div class="lbl">APUs con insumos en bolsa</div><div style="font-size:20px;font-weight:700">' + datos.apus.length + '</div></div>' +
-      '<div><div class="lbl">Insumos coincidentes</div><div style="font-size:20px;font-weight:700">' + totalCoinciden + '</div></div>' +
-    '</div></div>';
+      '<div><div class="lbl">APUs</div><div style="font-size:20px;font-weight:700">' + datos.apus.length + '</div></div>' +
+      '<div><div class="lbl">Valor total (costo directo × cantidad)</div><div style="font-size:20px;font-weight:700">' + cop(valorTotal) + '</div></div>' +
+    '</div>' +
+    (sinValores ? '<div class="cbd"><div class="err">Estos APUs se importaron sin valores. ' +
+      'Re-importa el Excel de presupuesto en la Ficha para ver desperdicio, valor unitario y totales.</div></div>' : '') +
+    '</div>';
 
     cuerpo += datos.apus.map(function (a) {
-      var filas = a.insumos.filter(function (i) { return i.enBolsa; }).map(function (i) {
-        var disp = bolsaDisponible(b, i.cod);
-        var enBolsa = bolsaItemsPorCod(b, i.cod).reduce(function (s, x) { return s + (x.cantTotal || 0); }, 0);
-        var color = disp > 0 ? "var(--ok,#2e7d32)" : "#c00";
-        return '<tr>' +
-          '<td class="m">' + esc(i.cod) + '</td>' +
-          '<td>' + esc(i.desc) + '</td>' +
-          '<td class="m">' + esc(i.und) + '</td>' +
-          '<td class="num">' + fmt(i.cantNec) + '</td>' +
-          '<td class="num">' + fmt(enBolsa) + '</td>' +
-          '<td class="num" style="color:' + color + ';font-weight:600">' + fmt(disp) + '</td></tr>';
-      }).join("");
-      var coinciden = a.insumos.filter(function (i) { return i.enBolsa; }).length;
-      return '<div class="card">' +
-        '<div class="chd" style="background:var(--navy);border-radius:5px 5px 0 0">' +
-          '<span class="ct" style="color:#fff">APU ' + a.apu + ' — ' + esc(a.desc) + '</span>' +
-          '<span class="cn" style="color:#93A4B4">' + esc(a.cap || "") +
-            ' · ' + esc(a.und || "") + ' · Anexo: ' + fmt(a.cantAnexo) +
-            ' · ' + coinciden + ' insumos en bolsa</span></div>' +
+      /* Misma tabla que "Cómo queda el análisis" en Apartados, solo lectura */
+      var fila = function (l) {
+        return '<tr' + (l.mo ? ' class="morow"' : '') + '>' +
+          '<td class="num">' + dec(l.cant) + '</td>' +
+          '<td class="m" style="font-size:12px">' + esc(l.cod) + '</td>' +
+          '<td>' + esc(l.desc) + '</td>' +
+          '<td style="color:var(--ink3);font-size:12px">' + esc(l.und) + '</td>' +
+          '<td style="text-align:center">' + (l.desp ? dec(l.desp) + '%' : '') + '</td>' +
+          '<td class="num">' + (l.precio === null ? '—' : cop(l.precio)) + '</td>' +
+          '<td class="num">' + (l.total === null ? '—' : cop(l.total)) + '</td>' +
+        '</tr>';
+      };
+      var secc = function (titulo, html) { return html ? '<tr class="seccrow"><td colspan="7">' + titulo + '</td></tr>' + html : ''; };
+      var filaTH = function (cod, nombre, v) {
+        return '<tr><td></td><td class="m" style="font-size:12px">' + cod + '</td><td>' + nombre + '</td>' +
+          '<td></td><td></td><td></td><td class="num">' + cop(v) + '</td></tr>';
+      };
+      var mat = a.lineas.filter(function (l) { return !l.mo; }).map(fila).join("");
+      var mo = a.lineas.filter(function (l) { return l.mo; }).map(fila).join("");
+      var th = a.th > 0 ? filaTH("TR1", "Transportes", a.transporte) + filaTH("HER1", "Herramienta de mano", a.herramienta) : "";
+      var dlr = function (k, v, cls) {
+        return '<div class="dlr' + (cls ? ' ' + cls : '') + '"><span class="dlk">' + k + '</span><span class="dlv m">' + cop(v) + '</span></div>';
+      };
+      return '<details class="card">' +
+        '<summary class="chd" style="cursor:pointer">' +
+          '<span class="ct">APU ' + a.apu + ' — ' + esc(a.desc) + '</span>' +
+          '<span class="cn">' + esc(a.cap || "") + ' · Cantidad: <strong style="color:var(--ink)">' +
+            dec(a.cantAnexo) + ' ' + esc(a.und || "") + '</strong> · ' + cop(a.directo) + '</span></summary>' +
         '<div class="scroll"><table class="tbl"><thead><tr>' +
-          '<th style="width:90px">Código</th><th>Descripción</th><th style="width:50px">Und</th>' +
-          '<th class="num" style="width:80px">Necesario</th>' +
-          '<th class="num" style="width:80px">En bolsa</th>' +
-          '<th class="num" style="width:80px">Disp.</th>' +
-        '</tr></thead><tbody>' + filas + '</tbody></table></div></div>';
+          '<th class="num" style="width:78px">Cant.</th><th style="width:104px">Código</th>' +
+          '<th>Descripción</th><th style="width:52px">Und</th>' +
+          '<th style="width:52px;text-align:center" title="Desperdicio">Desp.</th>' +
+          '<th class="num" style="width:100px">Vr. unitario</th><th class="num" style="width:94px">Vr. total</th>' +
+        '</tr></thead><tbody>' +
+          secc("I · Materiales", mat) + secc("II · Transporte y herramienta", th) + secc("III · Mano de obra", mo) +
+        '</tbody></table></div>' +
+        '<div class="cbd" style="border-top:1px solid var(--line2)"><div class="dl">' +
+          dlr("Subtotal materiales", a.mat) +
+          (a.th > 0 ? dlr("Transporte y herramienta", a.th) : "") +
+          dlr("Subtotal mano de obra", a.mo) +
+          dlr("Costo directo", a.directo, "dltot") +
+        '</div><div class="aporte">' +
+          dlr("Aporte · " + dec(a.cantAnexo) + " " + esc(a.und || "") + " × " + cop(a.directo), a.directo * (a.cantAnexo || 0), "dltot") +
+        '</div></div></details>';
     }).join("");
   }
 
@@ -1797,6 +1931,7 @@ function exportarPedidoExcel(b, numPedido) {
   // Items
   var dataStart = thRow + 1;
   var pedItems = ped.items || [];
+  var subtotalXl = 0;
   for (var ii = 0; ii < pedItems.length; ii++) {
     var li = pedItems[ii];
     var esExtra = li.cod && (li.cod.indexOf("AD_") === 0 || li.cod.indexOf("OS_") === 0);
@@ -1812,7 +1947,10 @@ function exportarPedidoExcel(b, numPedido) {
     rr.getCell(3).value = und;
     rr.getCell(4).value = li.cant || 0;
     rr.getCell(5).value = precio; rr.getCell(5).numFmt = moneda;
-    rr.getCell(6).value = { formula: "D" + (dataStart + ii) + "*E" + (dataStart + ii) }; rr.getCell(6).numFmt = moneda;
+    /* Fórmula con su resultado: se ve el valor aunque el visor no recalcule */
+    var totLinea = (li.cant || 0) * (precio || 0);
+    subtotalXl += totLinea;
+    rr.getCell(6).value = { formula: "D" + (dataStart + ii) + "*E" + (dataStart + ii), result: totLinea }; rr.getCell(6).numFmt = moneda;
     rr.getCell(7).value = li.obs || "";
     rr.getCell(8).value = cap;
     rr.getCell(9).value = aura;
@@ -1832,19 +1970,19 @@ function exportarPedidoExcel(b, numPedido) {
   var trSub = ws.getRow(totRow);
   ws.mergeCells("A" + totRow + ":E" + totRow);
   trSub.getCell(1).value = "SUB TOTAL:"; trSub.getCell(1).font = fB; trSub.getCell(1).alignment = { horizontal: "right" };
-  trSub.getCell(6).value = { formula: "SUM(F" + dataStart + ":F" + lastData + ")" }; trSub.getCell(6).numFmt = moneda; trSub.getCell(6).font = fB;
+  trSub.getCell(6).value = { formula: "SUM(F" + dataStart + ":F" + lastData + ")", result: subtotalXl }; trSub.getCell(6).numFmt = moneda; trSub.getCell(6).font = fB;
   for (var tc = 1; tc <= 9; tc++) trSub.getCell(tc).border = borde;
 
   var trIva = ws.getRow(totRow + 1);
   ws.mergeCells("A" + (totRow + 1) + ":E" + (totRow + 1));
   trIva.getCell(1).value = "IVA 19%:"; trIva.getCell(1).font = fB; trIva.getCell(1).alignment = { horizontal: "right" };
-  trIva.getCell(6).value = { formula: "F" + totRow + "*0.19" }; trIva.getCell(6).numFmt = moneda; trIva.getCell(6).font = fB;
+  trIva.getCell(6).value = { formula: "F" + totRow + "*0.19", result: subtotalXl * 0.19 }; trIva.getCell(6).numFmt = moneda; trIva.getCell(6).font = fB;
   for (var ic = 1; ic <= 9; ic++) trIva.getCell(ic).border = borde;
 
   var trTot = ws.getRow(totRow + 2);
   ws.mergeCells("A" + (totRow + 2) + ":E" + (totRow + 2));
   trTot.getCell(1).value = "TOTAL:"; trTot.getCell(1).font = { bold: true, size: 11, name: "Arial" }; trTot.getCell(1).alignment = { horizontal: "right" };
-  trTot.getCell(6).value = { formula: "F" + totRow + "+F" + (totRow + 1) }; trTot.getCell(6).numFmt = moneda;
+  trTot.getCell(6).value = { formula: "F" + totRow + "+F" + (totRow + 1), result: subtotalXl * 1.19 }; trTot.getCell(6).numFmt = moneda;
   trTot.getCell(6).font = { bold: true, size: 11, name: "Arial" }; trTot.getCell(6).fill = { type: "pattern", pattern: "solid", fgColor: { argb: LIME } };
   for (var gc = 1; gc <= 9; gc++) trTot.getCell(gc).border = borde;
 
