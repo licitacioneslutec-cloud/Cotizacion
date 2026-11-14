@@ -107,4 +107,52 @@ assert.strictEqual(a1.transporte, 10);
 assert.strictEqual(a1.herramienta, 5);
 assert.strictEqual(a1.directo, 338.6);
 
+// Tope de pedidos: obra/provisional no pueden superar el disponible por código + capítulo
+const bt = { items: [{ tipo: "it", cod: "C", capitulo: "K1", cantTotal: 10 }, { tipo: "it", cod: "C", capitulo: "K2", cantTotal: 5 }],
+  pedidos: [{ num: 1, tipo: "obra", items: [{ cod: "C", cap: "K1", cant: 8 }] }] };
+assert.strictEqual(ctx.bolsaExcedidos(bt, [{ cod: "C", cap: "K1", cant: 2 }]).length, 0);
+assert.strictEqual(ctx.bolsaExcedidos(bt, [{ cod: "C", cap: "K1", cant: 3 }]).length, 1);
+assert.strictEqual(ctx.bolsaExcedidos(bt, [{ cod: "C", cap: "K1", cant: 2 }, { cod: "C", cap: "K1", cant: 1 }]).length, 1); // líneas se suman
+assert.strictEqual(ctx.bolsaExcedidos(bt, [{ cod: "C", cap: "K2", cant: 5 }]).length, 0);
+assert.strictEqual(ctx.bolsaExcedidos(bt, [{ cod: "AD_001", cant: 999 }]).length, 0);
+// Editando el pedido 1: lo que ya tenía (8) vuelve a contar
+assert.strictEqual(ctx.bolsaExcedidos(bt, [{ cod: "C", cap: "K1", cant: 10 }], 1).length, 0);
+assert.strictEqual(ctx.bolsaExcedidos(bt, [{ cod: "C", cap: "K1", cant: 11 }], 1).length, 1);
+
+// Presupuesto tipo Licify: "Cód. APU" como título, Vr. Unitario/Vr. Total repetidos (suministro y MO)
+const presWs = XLSX.utils.aoa_to_sheet([
+  ["Formulario"],
+  [null, null, "Item", "Descripción", "Unidad", "Cantidad", "SUMINISTRO", "Vr. Unitario", "Vr. Total", "Vr. Unitario", null, "Vr. Total"],
+  [null, "Cód. APU", null, "Salidas Torre 2"],
+  ["APU0", 1, 1, "Salida cableada", "Un", 10, 0.19, 100, 1000, 50, null, 500],
+  ["APU2", 2, 2, "Tomacorriente", "Un", 4, 0.19, 10, 40, 5, null, 20],
+  ["APU3", 3, 3, "GFCI", "Un", 2, 0.19, 1, 2, 1, null, 2],
+  [null, null, null, "Acometidas"],
+  [null, null, 4, "Ítem sin APU", "Ml", 3, 0.19, 7, 21, 0, null, 0]
+]);
+const detP = ctx._detectarPresupuesto(presWs);
+assert.strictEqual(detP.mapa.apu, 1);
+assert.strictEqual(detP.mapa.precioSum, 7);
+assert.strictEqual(detP.mapa.precioMo, 9);
+assert.strictEqual(detP.mapa.totalMo, 11);
+const pres = ctx._extraerPresupuesto(presWs, detP.mapa);
+const presIt = pres.filter(x => x.tipo === "it");
+assert.strictEqual(pres.filter(x => x.tipo === "cap").map(x => x.desc).join("|"), "Salidas Torre 2|Acometidas");
+assert.strictEqual(presIt.length, 4);
+assert.strictEqual(presIt[0].apu, 1);
+assert.strictEqual(presIt[0].precioSum, 100);
+assert.strictEqual(presIt[0].precioMo, 50);
+assert.strictEqual(presIt[0].precioUnit, 150);
+assert.strictEqual(presIt[0].valorTotal, 1500);
+assert.strictEqual(presIt[3].apu, 0); // ítem con cantidad pero sin APU
+
+// Sin título de APU: se toma la columna con números junto a "APU12"
+const sinTit = XLSX.utils.aoa_to_sheet([
+  [null, null, "Item", "Descripción", "Unidad", "Cantidad"],
+  ["APU1", 7, "1", "A", "Un", 1], ["APU2", 8, "2", "B", "Un", 1], ["APU3", 9, "3", "C", "Un", 1]
+]);
+const detS = ctx._detectarPresupuesto(sinTit);
+assert.strictEqual(detS.mapa.apu, 1);
+assert.ok(/APU/.test(detS.apuComo));
+
 console.log("bolsas.check OK");

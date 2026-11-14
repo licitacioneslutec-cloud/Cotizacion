@@ -64,6 +64,27 @@ function bolsaItemsPorCod(b, cod) {
   return (b.items || []).filter(function (it) { return it.tipo === "it" && it.cod === cod; });
 }
 
+/* Líneas de un pedido de obra/provisional que piden más de lo disponible (por código + capítulo).
+   excluirNum: al editar un pedido, lo que ese mismo pedido ya tenía vuelve a contar como disponible. */
+function bolsaExcedidos(b, lineas, excluirNum) {
+  var pedida = {}, msgs = [], SEP = "\u0001";
+  lineas.forEach(function (l) {
+    if (!l.cod || l.cod.indexOf("AD_") === 0 || l.cod.indexOf("OS_") === 0) return;
+    var k = l.cod + SEP + (l.cap || "");
+    pedida[k] = (pedida[k] || 0) + (Number(l.cant) || 0);
+  });
+  Object.keys(pedida).forEach(function (k) {
+    var cod = k.split(SEP)[0], cap = k.split(SEP)[1];
+    var disp = bolsaDisponible(b, cod, cap);
+    (b.pedidos || []).forEach(function (ped) {
+      if (excluirNum === undefined || ped.num !== excluirNum || ped.tipo === "adicional" || ped.tipo === "omision") return;
+      (ped.items || []).forEach(function (li) { if (li.cod === cod && bolsaCapDeLinea(b, li) === cap) disp += (li.cant || 0); });
+    });
+    if (pedida[k] > disp + 1e-9) msgs.push(cod + (cap ? " [" + cap + "]" : "") + ": pide " + fmt(pedida[k]) + ", disponible " + fmt(disp));
+  });
+  return msgs;
+}
+
 /* Antes de mover capítulos, las líneas antiguas (sin cap) quedan fijas en el capítulo que hoy les toca */
 function _bolsaFijarCapLineas(b) {
   (b.pedidos || []).forEach(function (ped) {
@@ -870,11 +891,12 @@ function renderBolsaPedido(b) {
     document.getElementById("pedAviso").style.display = esExtra ? "" : "none";
     document.getElementById("pedAddExtra").style.display = esExtra ? "" : "none";
   }
-  tipoSel.onchange = actualizarTipoUI;
+  tipoSel.onchange = function () { actualizarTipoUI(); redibujarLineas(); };
 
   function redibujarLineas() {
     var body = document.getElementById("pedBody");
     var total = 0;
+    var topado = tipoSel.value === "obra" || tipoSel.value === "provisional";
     body.innerHTML = lineas.map(function (l, i) {
       var esExtra = l.cod && (l.cod.indexOf("AD_") === 0 || l.cod.indexOf("OS_") === 0);
       var opciones = esExtra ? [] : bolsaItemsPorCod(b, l.cod);
@@ -913,7 +935,9 @@ function renderBolsaPedido(b) {
         '<td style="font-size:12px">' + (it ? esc(it.desc) : '<span style="color:var(--ink3)">—</span>') + '</td>' +
         '<td class="m">' + (it ? esc(it.und) : "") + '</td>' +
         '<td class="num">' + (it ? fmt(disp) : "—") + '</td>' +
-        '<td><input class="in m" type="number" min="0" data-pedcant="' + i + '" value="' + (l.cant || "") + '" style="width:70px;text-align:right"></td>' +
+        '<td><input class="in m" type="number" min="0"' + (topado && it ? ' max="' + Math.max(disp, 0) + '"' : '') +
+          ' data-pedcant="' + i + '" value="' + (l.cant || "") + '" style="width:70px;text-align:right' +
+          (topado && (l.cant || 0) > disp ? ';border-color:#c00;color:#c00" title="Supera lo disponible (' + fmt(disp) + ')' : '') + '"></td>' +
         '<td class="num">' + (it ? cop(it.precio) : "—") + '</td>' +
         '<td class="num">' + cop(sub) + '</td>' +
         '<td><input class="in m" data-pedobs="' + i + '" value="' + esc(l.obs) + '" style="width:70px"></td>' +
@@ -985,13 +1009,9 @@ function renderBolsaPedido(b) {
     var tipo = tipoSel.value;
 
     if (tipo === "obra" || tipo === "provisional") {
-      var warn = [];
-      itemsVal.forEach(function (l) {
-        if (l.cod.indexOf("AD_") === 0 || l.cod.indexOf("OS_") === 0) return;
-        var disp = bolsaDisponible(b, l.cod, l.cap || "");
-        if (l.cant > disp) warn.push(l.cod + (l.cap ? " [" + l.cap + "]" : "") + " (pide " + l.cant + ", disp " + fmt(disp) + ")");
-      });
-      if (warn.length && !confirm("Estos ítems exceden el disponible:\n" + warn.join("\n") + "\n\n¿Registrar de todos modos?")) return;
+      /* Obra y provisional no pueden pedir más de lo que queda en la bolsa */
+      var warn = bolsaExcedidos(b, itemsVal);
+      if (warn.length) { avisoError("No se registró: estos ítems superan lo disponible en la bolsa. " + warn.join(" · ")); return; }
     }
 
     var items = itemsVal.map(function (l) {
@@ -1032,7 +1052,16 @@ function renderBolsaHistorial(b) {
   var qh = (vista.filtBolsaHist || "").toLowerCase();
   var filas = "";
   var prevNum = -1;
-  (b.pedidos || []).forEach(function (ped) {
+  var edIdx = vista.bolsaEditPed, draft = vista.bolsaEditDraft;
+  if (edIdx !== undefined && edIdx !== null && (!draft || !b.pedidos[edIdx] || vista.bolsaEditBolsa !== b.id)) {
+    edIdx = null; vista.bolsaEditPed = null; vista.bolsaEditDraft = null;
+  }
+  var tipos = [["obra", "Obra"], ["provisional", "Provisional"], ["omision", "Omisión"], ["adicional", "Adicional"]];
+  var mini = 'style="font-size:11px;padding:2px 8px"';
+  (b.pedidos || []).forEach(function (ped, pi) {
+    /* Pedido en edición: se dibuja el borrador con campos editables */
+    if (pi === edIdx) { filas += _filasPedidoEdicion(b, draft, tipos, mini); return; }
+
     var pedTieneMatch = false;
     if (!qh) pedTieneMatch = true;
     else {
@@ -1045,13 +1074,15 @@ function renderBolsaHistorial(b) {
     if (ped.num !== prevNum) {
       prevNum = ped.num;
       filas += '<tr style="background:var(--bg2)">' +
-        '<td colspan="9" style="font-weight:600;padding:8px 6px">' +
+        '<td colspan="8" style="font-weight:600;padding:8px 6px">' +
           'Pedido #' + ped.num + ' — ' + esc(ped.fecha) + ' — ' + esc(ped.tipo || "obra") +
           (ped.solicitante ? ' — ' + esc(ped.solicitante) : '') +
         '</td>' +
-        '<td colspan="2" style="text-align:right;padding:8px 6px;white-space:nowrap">' +
-          '<button class="btn" data-imprimir="' + ped.num + '" style="font-size:11px;padding:2px 8px">Imprimir</button> ' +
-          '<button class="btn" data-expexcel="' + ped.num + '" style="font-size:11px;padding:2px 8px">Excel</button>' +
+        '<td colspan="3" style="text-align:right;padding:8px 6px;white-space:nowrap">' +
+          '<button class="btn" data-imprimir="' + ped.num + '" ' + mini + '>Imprimir</button> ' +
+          '<button class="btn" data-expexcel="' + ped.num + '" ' + mini + '>Excel</button> ' +
+          '<button class="btn" data-editped="' + pi + '" ' + mini + '>Editar</button> ' +
+          '<button class="btn" data-delped="' + pi + '" style="font-size:11px;padding:2px 8px;color:#c00">Eliminar</button>' +
         '</td>' +
       '</tr>';
     }
@@ -1107,6 +1138,7 @@ function renderBolsaHistorial(b) {
   Array.prototype.forEach.call(document.querySelectorAll("[data-expexcel]"), function (btn) {
     btn.onclick = function () { exportarPedidoExcel(b, Number(btn.dataset.expexcel)); };
   });
+  _enlazarEdicionPedidos(b);
 
   var fh = document.getElementById("filtBolsaHist");
   if (fh) fh.oninput = function () {
@@ -1115,6 +1147,123 @@ function renderBolsaHistorial(b) {
     render(); window.scrollTo(0, y);
     var n = document.getElementById("filtBolsaHist");
     if (n) { n.focus(); n.setSelectionRange(pos, pos); }
+  };
+}
+
+/* ---- 5b. Editar / eliminar pedidos desde el Historial ---- */
+
+function _filasPedidoEdicion(b, d, tipos, mini) {
+  var inp = function (k, v, extra) { return '<input class="in" data-edped="' + k + '" value="' + esc(v == null ? "" : v) + '"' + (extra || "") + '>'; };
+  var html = '<tr style="background:#fff8e1">' +
+    '<td colspan="8" style="padding:8px 6px"><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
+      '<b>Editando pedido #' + d.num + '</b>' +
+      inp("fecha", d.fecha, ' type="date" style="width:150px"') +
+      inp("solicitante", d.solicitante, ' placeholder="Solicitante" style="width:180px"') +
+      '<select class="in" data-edped="tipo" style="width:140px">' + tipos.map(function (t) {
+        return '<option value="' + t[0] + '"' + ((d.tipo || "obra") === t[0] ? " selected" : "") + '>' + t[1] + '</option>';
+      }).join("") + '</select>' +
+    '</div></td>' +
+    '<td colspan="3" style="text-align:right;padding:8px 6px;white-space:nowrap">' +
+      '<button class="btn btnp" id="edPedGuardar" ' + mini + '>Guardar</button> ' +
+      '<button class="btn" id="edPedCancelar" ' + mini + '>Cancelar</button>' +
+    '</td></tr>';
+  var topado = d.tipo === "obra" || d.tipo === "provisional";
+  (d.items || []).forEach(function (li, i) {
+    var esExtra = li.cod && (li.cod.indexOf("AD_") === 0 || li.cod.indexOf("OS_") === 0);
+    var opciones = esExtra ? [] : bolsaItemsPorCod(b, li.cod);
+    var it = esExtra ? null : bolsaItemPorCod(b, li.cod, li.cap);
+    var precio = esExtra ? (li.precio || 0) : (it ? it.precio : 0);
+    var celCap = esExtra || !opciones.length ? esc(li.cap || "") :
+      '<select class="in" data-edli="' + i + '|cap" style="font-size:12px">' + opciones.map(function (o) {
+        var c = o.capitulo || "";
+        return '<option value="' + esc(c) + '"' + (c === li.cap ? " selected" : "") + '>' + esc(c || "Sin capítulo") +
+          ' (disp. ' + fmt(bolsaDisponible(b, li.cod, c)) + ')</option>';
+      }).join("") + '</select>';
+    html += '<tr style="background:#fffdf5">' +
+      '<td class="m">' + d.num + '</td><td></td><td></td>' +
+      '<td class="m">' + esc(li.cod) + '</td>' +
+      '<td>' + celCap + '</td>' +
+      '<td style="font-size:12px">' + (esExtra ? '<input class="in" data-edli="' + i + '|desc" value="' + esc(li.desc || "") + '">' : esc(it ? it.desc : "—")) + '</td>' +
+      '<td><input class="in m" type="number" min="0" step="any" data-edli="' + i + '|cant" value="' + (li.cant || 0) + '" style="width:80px;text-align:right"></td>' +
+      '<td class="num">' + (esExtra ? '<input class="in m" type="number" min="0" data-edli="' + i + '|precio" value="' + (li.precio || 0) + '" style="width:90px;text-align:right">' : cop(precio)) + '</td>' +
+      '<td class="num">' + cop((li.cant || 0) * precio) + '</td>' +
+      '<td class="m" style="font-size:11px">' + (topado && !esExtra ? 'resta' : 'no resta') + '</td>' +
+      '<td style="white-space:nowrap"><input class="in" data-edli="' + i + '|obs" value="' + esc(li.obs || "") + '" style="width:90px">' +
+        '<button class="btnx" data-edquita="' + i + '" title="Quitar línea" style="color:#c00;margin-left:4px">&times;</button></td>' +
+    '</tr>';
+  });
+  return html;
+}
+
+function _enlazarEdicionPedidos(b) {
+  var reRender = function () { var y = window.scrollY; render(); window.scrollTo(0, y); };
+
+  Array.prototype.forEach.call(document.querySelectorAll("[data-editped]"), function (btn) {
+    btn.onclick = function () {
+      var pi = Number(btn.dataset.editped), ped = b.pedidos[pi];
+      if (!ped) return;
+      var d = JSON.parse(JSON.stringify(ped));
+      /* Las líneas antiguas sin capítulo quedan fijadas en el que hoy les toca */
+      (d.items || []).forEach(function (li) {
+        var esExtra = li.cod && (li.cod.indexOf("AD_") === 0 || li.cod.indexOf("OS_") === 0);
+        if (!esExtra && (li.cap === undefined || li.cap === null)) li.cap = bolsaCapDeLinea(b, li);
+      });
+      vista.bolsaEditPed = pi; vista.bolsaEditDraft = d; vista.bolsaEditBolsa = b.id;
+      reRender();
+    };
+  });
+
+  /* Eliminar con doble verificación */
+  Array.prototype.forEach.call(document.querySelectorAll("[data-delped]"), function (btn) {
+    btn.onclick = function () {
+      var pi = Number(btn.dataset.delped), ped = b.pedidos[pi];
+      if (!ped) return;
+      if (!confirm("¿Eliminar el pedido #" + ped.num + "?\nSus cantidades vuelven a quedar disponibles en la bolsa.")) return;
+      var r = prompt("Esta acción no se puede deshacer.\nEscribe el número del pedido (" + ped.num + ") para confirmar:");
+      if (r === null || String(r).trim() !== String(ped.num)) { avisoError("No se eliminó el pedido #" + ped.num + "."); return; }
+      b.pedidos.splice(pi, 1);
+      vista.bolsaEditPed = null; vista.bolsaEditDraft = null;
+      Bolsas.guardar(b);
+      avisoOk("Pedido #" + ped.num + " eliminado.");
+      reRender();
+    };
+  });
+
+  var d = vista.bolsaEditDraft;
+  if (vista.bolsaEditPed === null || vista.bolsaEditPed === undefined || !d) return;
+
+  Array.prototype.forEach.call(document.querySelectorAll("[data-edped]"), function (el) {
+    el.onchange = function () { d[el.dataset.edped] = el.value; if (el.dataset.edped === "tipo") reRender(); };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-edli]"), function (el) {
+    el.onchange = function () {
+      var p = el.dataset.edli.split("|"), li = d.items[Number(p[0])], k = p[1];
+      if (!li) return;
+      li[k] = (k === "cant" || k === "precio") ? (Number(el.value) || 0) : el.value;
+      if (k !== "obs" && k !== "desc") reRender();
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-edquita]"), function (btn) {
+    btn.onclick = function () { d.items.splice(Number(btn.dataset.edquita), 1); reRender(); };
+  });
+
+  document.getElementById("edPedCancelar").onclick = function () {
+    vista.bolsaEditPed = null; vista.bolsaEditDraft = null; reRender();
+  };
+  document.getElementById("edPedGuardar").onclick = function () {
+    var pi = vista.bolsaEditPed, orig = b.pedidos[pi];
+    d.items = (d.items || []).filter(function (li) { return li.cod && (li.cant || 0) > 0; });
+    if (!d.items.length) { avisoError("El pedido quedó sin ítems. Si ya no sirve, usa Eliminar."); return; }
+    if (d.tipo === "obra" || d.tipo === "provisional") {
+      /* Lo que este pedido ya tenía vuelve a contar como disponible */
+      var warn = bolsaExcedidos(b, d.items, orig.num);
+      if (warn.length) { avisoError("No se guardó: estos ítems superan lo disponible en la bolsa. " + warn.join(" · ")); return; }
+    }
+    b.pedidos[pi] = d;
+    vista.bolsaEditPed = null; vista.bolsaEditDraft = null;
+    Bolsas.guardar(b);
+    avisoOk("Pedido #" + d.num + " actualizado.");
+    reRender();
   };
 }
 
@@ -1212,12 +1361,18 @@ function renderBolsaResumen(b) {
 /* ---- Presupuesto y APUs (cruce con proyecto) ---- */
 
 var ROLES_PRESUPUESTO = [
-  { id: "apu", nombre: "APU", test: function (t) { return t === "apu"; } },
+  { id: "apu", nombre: "APU", test: function (t) { return t === "apu" || t === "codapu" || t === "codigoapu" || t === "napu" || t === "noapu"; } },
   { id: "desc", nombre: "Descripción", test: function (t) { return t.indexOf("descripcion") === 0; } },
   { id: "und", nombre: "Unidad", test: function (t) { return t === "unidad" || t === "und" || t === "um"; } },
   { id: "cant", nombre: "Cantidad", test: function (t) { return t === "cantidad" || t === "cant"; } },
-  { id: "precioUnit", nombre: "Precio unitario", test: function (t) { return t === "valorunitario" || t === "preciounitario" || t === "vlrunitario"; } },
-  { id: "valorTotal", nombre: "Valor total", test: function (t) { return t === "valortotal" || t === "vlrtotal"; } },
+  { id: "precioUnit", nombre: "Precio unitario", test: function (t) { return t === "valorunitario" || t === "preciounitario" || t === "vlrunitario" || t === "vrunitario" || t === "vrunit"; } },
+  { id: "valorTotal", nombre: "Valor total", test: function (t) { return t === "valortotal" || t === "vlrtotal" || t === "vrtotal"; } },
+  /* Cuando el presupuesto viene separado: no se autodetectan por nombre, se asignan al repetirse
+     la columna de precio/total (la primera es suministro, la segunda mano de obra) o a mano */
+  { id: "precioSum", nombre: "Precio unitario suministro", test: function () { return false; } },
+  { id: "totalSum", nombre: "Valor total suministro", test: function () { return false; } },
+  { id: "precioMo", nombre: "Precio unitario mano de obra", test: function () { return false; } },
+  { id: "totalMo", nombre: "Valor total mano de obra", test: function () { return false; } },
   { id: "item", nombre: "Item / Número", test: function (t) { return t === "n" || t === "no" || t === "item" || t === "numero"; } }
 ];
 
@@ -1247,6 +1402,60 @@ function _detectarEnHoja(sheet, roles) {
   return null;
 }
 
+/* Encabezado del presupuesto + ajustes que la detección simple no cubre:
+   - precio/total repetidos (suministro y mano de obra en columnas aparte)
+   - columna de APU sin título: "Cód. APU" en las filas de abajo, o la columna junto a "APU12".
+   det.apuComo dice cómo se encontró la columna de APU (o queda vacío si no existe). */
+function _detectarPresupuesto(sheet) {
+  var det = _detectarEnHoja(sheet, ROLES_PRESUPUESTO);
+  if (!det) return null;
+  var rng = XLSX.utils.decode_range(sheet["!ref"] || "A1");
+  var m = det.mapa, hr = det.fila;
+  var rol = function (id) { return ROLES_PRESUPUESTO.filter(function (r) { return r.id === id; })[0]; };
+  for (var c = rng.s.c; c <= rng.e.c; c++) {
+    var t = norm(_cellVal(sheet, hr, c));
+    if (m.precioUnit !== undefined && c > m.precioUnit && m.precioMo === undefined && rol("precioUnit").test(t)) {
+      m.precioSum = m.precioUnit; m.precioMo = c; delete m.precioUnit;
+    } else if (m.valorTotal !== undefined && c > m.valorTotal && m.totalMo === undefined && rol("valorTotal").test(t)) {
+      m.totalSum = m.valorTotal; m.totalMo = c; delete m.valorTotal;
+    }
+  }
+  det.apuComo = m.apu !== undefined ? "título de la columna" : "";
+  if (m.apu === undefined) {
+    for (var r = hr + 1; r <= Math.min(rng.e.r, hr + 4) && m.apu === undefined; r++) {
+      for (var c2 = rng.s.c; c2 <= rng.e.c; c2++) {
+        var v2 = _cellVal(sheet, r, c2);
+        if (rol("apu").test(norm(v2))) { m.apu = c2; det.apuComo = "título «" + String(v2).trim() + "» debajo del encabezado"; break; }
+      }
+    }
+  }
+  if (m.apu === undefined) {
+    var hits = {}, hasta = Math.min(rng.e.r, hr + 60);
+    for (var r2 = hr + 1; r2 <= hasta; r2++) {
+      for (var c3 = rng.s.c; c3 <= rng.e.c; c3++) {
+        if (/^APU\d+$/i.test(String(_cellVal(sheet, r2, c3) || "").trim())) hits[c3] = (hits[c3] || 0) + 1;
+      }
+    }
+    Object.keys(hits).forEach(function (k) {
+      if (m.apu !== undefined || hits[k] < 3) return;
+      var col = Number(k), nums = 0;
+      for (var r3 = hr + 1; r3 <= hasta; r3++) {
+        if (/^APU\d+$/i.test(String(_cellVal(sheet, r3, col) || "").trim()) && typeof _cellVal(sheet, r3, col + 1) === "number") nums++;
+      }
+      /* El número del APU suele ir en la columna siguiente; si no, se toma del texto "APU12" */
+      if (nums >= hits[k] / 2) { m.apu = col + 1; det.apuComo = "números junto a la columna «APU…» (col " + XLSX.utils.encode_col(col) + ")"; }
+      else { m.apu = col; det.apuComo = "textos «APU…»"; }
+    });
+  }
+  return det;
+}
+
+function _numApu(v) {
+  if (typeof v === "number") return v || 0;
+  var mm = /APU\s*(\d+)/i.exec(String(v || ""));
+  return mm ? Number(mm[1]) : (Number(v) || 0);
+}
+
 function _hallarColBaseAPU(sheet) {
   var rng = XLSX.utils.decode_range(sheet["!ref"] || "A1");
   for (var r = rng.s.r; r <= Math.min(rng.e.r, rng.s.r + 100); r++) {
@@ -1273,20 +1482,30 @@ function _htmlMapeoPresupuesto() {
     }).join("");
 
   var sheet = wb.Sheets[wb.SheetNames[_wbPresupHojaOf]];
-  var det = sheet ? _detectarEnHoja(sheet, ROLES_PRESUPUESTO) : null;
+  var det = sheet ? _detectarPresupuesto(sheet) : null;
   var columnas = [];
   if (sheet) {
     var rng = XLSX.utils.decode_range(sheet["!ref"] || "A1");
     var hr = det ? det.fila : 0;
     for (var c = rng.s.c; c <= rng.e.c; c++) {
       var v = _cellVal(sheet, hr, c);
-      var nombre = v != null ? String(v).trim() : "";
-      if (!nombre) continue;
+      var nombre = v != null ? String(v).trim().replace(/\s+/g, " ") : "";
+      /* Ejemplo del primer dato: distingue columnas repetidas o sin título */
+      var ej = "";
+      for (var r = hr + 1; r <= Math.min(rng.e.r, hr + 30) && !ej; r++) {
+        var dv = _cellVal(sheet, r, c);
+        if (dv !== null && String(dv).trim() !== "") ej = typeof dv === "number" ? dec(Math.round(dv * 100) / 100) : String(dv).trim().slice(0, 30);
+      }
+      if (!nombre && !ej) continue;
       var rol = null;
       if (det) Object.keys(det.mapa).forEach(function (k) { if (det.mapa[k] === c) rol = k; });
-      columnas.push({ i: c, nombre: nombre, rol: rol });
+      columnas.push({ i: c, nombre: (nombre || "(sin título)") + " · col " + XLSX.utils.encode_col(c), ej: ej, rol: rol });
     }
   }
+  var avisoApu = !sheet ? "" : (det && det.mapa.apu !== undefined
+    ? '<div class="ok" style="margin-top:10px">Columna APU: <b>col ' + XLSX.utils.encode_col(det.mapa.apu) + '</b> (' + esc(det.apuComo) + ')</div>'
+    : '<div class="err" style="margin-top:10px"><b>No existe columna APU en esta hoja.</b> Las filas con cantidad se importan como ítems sin análisis. ' +
+      'Si alguna columna trae el número de APU, asígnala como «APU» en la tabla.</div>');
 
   var opciones = function (rolActual) {
     var o = '<option value=""' + (rolActual ? "" : " selected") + '>No usar</option>';
@@ -1296,7 +1515,9 @@ function _htmlMapeoPresupuesto() {
     return o;
   };
   var filasTbl = columnas.map(function (c) {
-    return '<tr><td class="m" style="font-size:12px">' + esc(c.nombre) + '</td>' +
+    return '<tr' + (c.rol === "apu" ? ' style="background:#e8f5e9"' : '') + '><td class="m" style="font-size:12px">' +
+      (c.rol === "apu" ? '<b>' + esc(c.nombre) + ' — APU</b>' : esc(c.nombre)) +
+      (c.ej ? '<div style="color:var(--ink3);font-size:11px">ej: ' + esc(c.ej) + '</div>' : '') + '</td>' +
       '<td><select class="in" data-cpres="' + c.i + '">' + opciones(c.rol) + '</select></td></tr>';
   }).join("");
 
@@ -1305,10 +1526,10 @@ function _htmlMapeoPresupuesto() {
     '<div class="g" style="grid-template-columns:1fr 1fr;gap:10px">' +
       '<div><label class="lbl">Hoja de presupuesto</label><select class="in" id="mp-hojaOf">' + optsHojas + '</select></div>' +
       '<div><label class="lbl">Hoja de APUs</label><select class="in" id="mp-hojaApu">' + optsApu + '</select></div>' +
-    '</div>' +
+    '</div>' + avisoApu +
     (columnas.length
       ? '<label class="lbl" style="margin-top:10px;display:block">Columnas encontradas</label>' +
-        '<div class="scroll" style="max-height:200px"><table class="tbl"><thead><tr>' +
+        '<div class="scroll" style="max-height:320px"><table class="tbl"><thead><tr>' +
           '<th style="width:46%">En el archivo</th><th>Corresponde a</th></tr></thead>' +
           '<tbody>' + filasTbl + '</tbody></table></div>'
       : '<div style="margin-top:8px;color:#888">No se detectaron columnas en esta hoja</div>') +
@@ -1321,25 +1542,31 @@ function _htmlMapeoPresupuesto() {
 function _extraerPresupuesto(sheet, mapa) {
   var presupuesto = [];
   var rng = XLSX.utils.decode_range(sheet["!ref"] || "A1");
-  var det = _detectarEnHoja(sheet, ROLES_PRESUPUESTO);
+  var det = _detectarPresupuesto(sheet);
   var inicio = det ? det.fila + 1 : 1;
   var m = {};
   Object.keys(mapa).forEach(function (k) { m[k] = mapa[k]; });
+  var txt = function (r, k) { var v = m[k] === undefined ? null : _cellVal(sheet, r, m[k]); return v === null ? "" : String(v).trim(); };
+  var num = function (r, k) { return m[k] === undefined ? 0 : (Number(_cellVal(sheet, r, m[k])) || 0); };
   for (var r = inicio; r <= rng.e.r; r++) {
-    var vApu = m.apu !== undefined ? (Number(_cellVal(sheet, r, m.apu)) || 0) : 0;
-    var vDesc = m.desc !== undefined ? String(_cellVal(sheet, r, m.desc) != null ? _cellVal(sheet, r, m.desc) : "").trim() : "";
+    var vApu = m.apu !== undefined ? _numApu(_cellVal(sheet, r, m.apu)) : 0;
+    var vDesc = txt(r, "desc").replace(/\s+/g, " ");
     if (!vDesc) continue;
-    if (!vApu) { presupuesto.push({ tipo: "cap", desc: vDesc }); continue; }
-    presupuesto.push({
-      tipo: "it",
-      item: m.item !== undefined ? String(_cellVal(sheet, r, m.item) != null ? _cellVal(sheet, r, m.item) : "") : "",
-      desc: vDesc,
-      und: m.und !== undefined ? String(_cellVal(sheet, r, m.und) != null ? _cellVal(sheet, r, m.und) : "") : "",
-      cant: m.cant !== undefined ? (Number(_cellVal(sheet, r, m.cant)) || 0) : 0,
-      apu: vApu,
-      precioUnit: m.precioUnit !== undefined ? (Number(_cellVal(sheet, r, m.precioUnit)) || 0) : 0,
-      valorTotal: m.valorTotal !== undefined ? (Number(_cellVal(sheet, r, m.valorTotal)) || 0) : 0
-    });
+    var cant = num(r, "cant");
+    /* Ítem si tiene APU o cantidad; si no tiene ninguno, es un título de capítulo */
+    if (!vApu && !cant) { presupuesto.push({ tipo: "cap", desc: vDesc }); continue; }
+    var pSum = num(r, "precioSum"), pMo = num(r, "precioMo");
+    var tSum = num(r, "totalSum") || pSum * cant, tMo = num(r, "totalMo") || pMo * cant;
+    var pUnit = num(r, "precioUnit") || (pSum + pMo);
+    var it = {
+      tipo: "it", item: txt(r, "item"), desc: vDesc, und: txt(r, "und"), cant: cant, apu: vApu,
+      precioUnit: pUnit,
+      valorTotal: num(r, "valorTotal") || (tSum + tMo) || pUnit * cant
+    };
+    if (m.precioSum !== undefined || m.precioMo !== undefined || m.totalSum !== undefined || m.totalMo !== undefined) {
+      it.precioSum = pSum; it.precioMo = pMo; it.totalSum = tSum; it.totalMo = tMo;
+    }
+    presupuesto.push(it);
   }
   return presupuesto;
 }
@@ -1493,14 +1720,33 @@ function importarInventarioDesdeProyecto(b) {
   return nuevos;
 }
 
+/* Desde el proyecto vinculado se calcula en vivo y se guarda una copia en la bolsa (snapProyecto),
+   para que Presupuesto y APUs sigan disponibles si el proyecto se borra. */
 function obtenerDatosCruce(b) {
   var p = b.proyectoId ? Store.leer(b.proyectoId) : null;
   if (p && p.datosApu) {
     var cat = Catalogo.leer();
-    if (cat && cat.comp) return cruzarDesdeProyecto(b, p, cat);
+    if (cat && cat.comp) {
+      var d = cruzarDesdeProyecto(b, p, cat);
+      var actual = b.snapProyecto ? JSON.stringify({ presupuesto: b.snapProyecto.presupuesto, apus: b.snapProyecto.apus }) : "";
+      if (actual !== JSON.stringify({ presupuesto: d.presupuesto, apus: d.apus })) {
+        b.snapProyecto = { fecha: new Date().toLocaleDateString("es-CO"), nombre: p.nombre || "", presupuesto: d.presupuesto, apus: d.apus };
+        Bolsas.guardar(b);
+      }
+      return d;
+    }
+  }
+  if (b.proyectoId && b.snapProyecto) {
+    var s = b.snapProyecto;
+    return { presupuesto: s.presupuesto, apus: s.apus,
+      aviso: p ? "" : "El proyecto vinculado «" + (s.nombre || "") + "» ya no existe; se muestra la última copia guardada (" + s.fecha + ")." };
   }
   if (b.apuExcel && b.apuExcel.length) return cruzarDesdeExcel(b);
   return null;
+}
+
+function _avisoCruce(datos) {
+  return datos && datos.aviso ? '<div class="card"><div class="cbd"><div class="err">' + esc(datos.aviso) + '</div></div></div>' : "";
 }
 
 function cruzarDesdeProyecto(b, p, cat) {
@@ -1517,6 +1763,14 @@ function cruzarDesdeProyecto(b, p, cat) {
     });
   });
 
+  /* Precios por ítem igual que en el Armado del proyecto (ui/proyecto.js vArmado) */
+  var t = totalesProyecto(p, cat);
+  var sep = (p.forma || "junta") === "separada";
+  var mg = p.margenes || {};
+  var pA = (mg.admin || 0) / 100, pI = (mg.imprev || 0) / 100, pU = (mg.util || 0) / 100, pV = (mg.iva || 0) / 100;
+  var aiuTotal = pA + pI + pU + pU * pV;
+  var matItem = function (v) { return pV > 0 ? v * (1 + aiuTotal) / (1 + pV) : v * (1 + aiuTotal); };
+
   var presupuesto = [];
   var lastCap = "";
   (p.hojas || []).forEach(function (h) {
@@ -1529,11 +1783,20 @@ function cruzarDesdeProyecto(b, p, cat) {
         return;
       }
       if (f.tipo === "it" && f.apu) {
-        presupuesto.push({
+        var a = t.porApu[f.apu] || {};
+        var q = p.usarCantObs && f.cantObs ? (Number(f.cantObs) || 0) : (Number(f.cant) || 0);
+        var it = {
           tipo: "it", item: f.item || "", desc: f.desc || "",
-          und: f.und || "", cant: Number(f.cant) || 0, apu: f.apu,
-          precioUnit: 0, valorTotal: 0
-        });
+          und: f.und || "", cant: q, apu: f.apu,
+          precioUnit: a.unitario || 0, valorTotal: (a.unitario || 0) * q
+        };
+        if (sep) {
+          it.precioSum = a.matConTh ? matItem(a.matConTh) : 0;
+          it.precioMo = a.mo || 0;
+          it.totalSum = it.precioSum * q; it.totalMo = it.precioMo * q;
+          it.precioUnit = it.precioSum + it.precioMo; it.valorTotal = it.totalSum + it.totalMo;
+        }
+        presupuesto.push(it);
       }
     });
   });
@@ -1590,7 +1853,8 @@ function cruzarDesdeExcel(b) {
     var coinciden = 0;
     if (apuData) apuData.insumos.forEach(function (ins) { if (bolsaCods[ins.cod]) coinciden++; });
     return { tipo: "it", item: x.item, desc: x.desc, und: x.und, cant: x.cant,
-      apu: x.apu, precioUnit: x.precioUnit, valorTotal: x.valorTotal, insCoinciden: coinciden };
+      apu: x.apu, precioUnit: x.precioUnit, valorTotal: x.valorTotal, insCoinciden: coinciden,
+      precioSum: x.precioSum, precioMo: x.precioMo, totalSum: x.totalSum, totalMo: x.totalMo };
   });
 
   var apus = [];
@@ -1643,7 +1907,13 @@ function renderBolsaPresupuesto(b) {
     });
     if (capItems.length) grupos.push({ cap: capActual || "Sin capítulo", items: capItems });
 
-    cuerpo = grupos.map(function (g) {
+    /* Separado en suministro y mano de obra si algún ítem lo trae */
+    var sep = datos.presupuesto.some(function (x) { return x.tipo === "it" && (x.precioSum !== undefined || x.precioMo !== undefined); });
+    var celda = function (v) { return v ? '<td class="num">' + cop(v) + '</td>' : '<td class="num" style="color:var(--ink3)">—</td>'; };
+    var suma = function (arr, k) { return arr.reduce(function (s, it) { return s + (it[k] || 0); }, 0); };
+    var granTotal = 0, granSum = 0, granMo = 0;
+
+    cuerpo = _avisoCruce(datos) + grupos.map(function (g) {
       var filas = g.items.map(function (it) {
         return '<tr>' +
           '<td class="m">' + esc(String(it.apu || "")) + '</td>' +
@@ -1651,24 +1921,36 @@ function renderBolsaPresupuesto(b) {
           '<td>' + esc(it.desc) + '</td>' +
           '<td class="m">' + esc(it.und || "") + '</td>' +
           '<td class="num">' + fmt(it.cant) + '</td>' +
-          (it.precioUnit ? '<td class="num">' + cop(it.precioUnit) + '</td>' : '<td class="num" style="color:var(--ink3)">—</td>') +
-          (it.valorTotal ? '<td class="num">' + cop(it.valorTotal) + '</td>' : '<td class="num" style="color:var(--ink3)">—</td>') +
+          (sep
+            ? celda(it.precioSum) + celda(it.totalSum) + celda(it.precioMo) + celda(it.totalMo) + celda(it.valorTotal)
+            : celda(it.precioUnit) + celda(it.valorTotal)) +
           '<td class="num" style="font-weight:600;color:' + (it.insCoinciden > 0 ? 'var(--ok,#2e7d32)' : 'var(--ink3)') + '">' +
             (it.insCoinciden || 0) + '</td></tr>';
       }).join("");
-      var totalCap = g.items.reduce(function (s, it) { return s + (it.valorTotal || 0); }, 0);
+      var totalCap = suma(g.items, "valorTotal"), sumCap = suma(g.items, "totalSum"), moCap = suma(g.items, "totalMo");
+      granTotal += totalCap; granSum += sumCap; granMo += moCap;
       return '<div class="card">' +
         '<div class="chd" style="background:var(--navy);border-radius:5px 5px 0 0">' +
           '<span class="ct" style="color:#fff">' + esc(g.cap) + '</span>' +
           '<span class="cn" style="color:#93A4B4">' + g.items.length + ' ítems' +
+            (sep ? ' · Sum. ' + cop(sumCap) + ' · MO ' + cop(moCap) : '') +
             (totalCap ? ' · ' + cop(totalCap) : '') + '</span></div>' +
         '<div class="scroll"><table class="tbl"><thead><tr>' +
           '<th style="width:50px">APU</th><th style="width:70px">Item</th><th>Descripción</th>' +
           '<th style="width:50px">Und</th><th class="num" style="width:70px">Cant.</th>' +
-          '<th class="num" style="width:100px">Precio</th><th class="num" style="width:100px">Total</th>' +
+          (sep
+            ? '<th class="num" style="width:95px">Vr. unit. sum.</th><th class="num" style="width:105px">Total sum.</th>' +
+              '<th class="num" style="width:95px">Vr. unit. MO</th><th class="num" style="width:105px">Total MO</th>' +
+              '<th class="num" style="width:110px">Total</th>'
+            : '<th class="num" style="width:100px">Precio</th><th class="num" style="width:100px">Total</th>') +
           '<th class="num" style="width:80px">Insumos</th>' +
         '</tr></thead><tbody>' + filas + '</tbody></table></div></div>';
     }).join("");
+    cuerpo = '<div class="card"><div class="cbd" style="display:flex;gap:24px;flex-wrap:wrap">' +
+      (sep ? '<div><div class="lbl">Suministro</div><div style="font-size:20px;font-weight:700">' + cop(granSum) + '</div></div>' +
+             '<div><div class="lbl">Mano de obra</div><div style="font-size:20px;font-weight:700">' + cop(granMo) + '</div></div>' : '') +
+      '<div><div class="lbl">Total presupuesto</div><div style="font-size:20px;font-weight:700">' + cop(granTotal) + '</div></div>' +
+    '</div></div>' + cuerpo;
   }
 
   app.innerHTML = barraTop("bolsas") +
@@ -1690,7 +1972,7 @@ function renderBolsaApus(b) {
   } else {
     var valorTotal = datos.apus.reduce(function (s, a) { return s + a.directo * (a.cantAnexo || 0); }, 0);
     var sinValores = datos.apus.some(function (a) { return a.sinValores; });
-    cuerpo = '<div class="card"><div class="cbd" style="display:flex;gap:24px;flex-wrap:wrap">' +
+    cuerpo = _avisoCruce(datos) + '<div class="card"><div class="cbd" style="display:flex;gap:24px;flex-wrap:wrap">' +
       '<div><div class="lbl">APUs</div><div style="font-size:20px;font-weight:700">' + datos.apus.length + '</div></div>' +
       '<div><div class="lbl">Valor total (costo directo × cantidad)</div><div style="font-size:20px;font-weight:700">' + cop(valorTotal) + '</div></div>' +
     '</div>' +
@@ -1794,6 +2076,7 @@ function imprimirPedido(b, numPedido) {
     fechaEnt = d.toISOString().slice(0, 10);
   }
 
+  var nombrePdf = "Pedido_" + numPedido + "_" + (b.nombre || "bolsa").replace(/[^a-zA-Z0-9]/g, "_") + ".pdf";
   var html = '<!doctype html><html><head><meta charset="utf-8"><title>Pedido #' + numPedido + '</title>' +
     '<style>' +
     'body{font-family:Arial,sans-serif;font-size:11px;margin:20px;color:#0f2436}' +
@@ -1809,8 +2092,14 @@ function imprimirPedido(b, numPedido) {
     '.tot td{font-weight:700;text-align:right;padding:3px 5px;border:1px solid #ccc;font-size:10px}' +
     '.firma{margin-top:40px;display:flex;justify-content:space-around}' +
     '.firma div{text-align:center;width:200px;border-top:1px solid #333;padding-top:4px;font-size:10px}' +
-    '@media print{body{margin:10mm}}' +
+    '.barra{display:flex;gap:8px;justify-content:flex-end;margin-bottom:10px}' +
+    '.barra button{font:600 12px Arial,sans-serif;padding:7px 14px;border:1px solid #0f2436;border-radius:4px;background:#fff;color:#0f2436;cursor:pointer}' +
+    '.barra button.p{background:#0f2436;color:#fff}' +
+    '@media print{body{margin:10mm}.barra{display:none}}' +
     '</style></head><body>' +
+    '<div class="barra"><button onclick="window.print()">Imprimir</button>' +
+      '<button class="p" id="btnPdf" onclick="descargarPdf()">Descargar PDF</button></div>' +
+    '<div id="doc">' +
     '<table><tr><td class="hdr" colspan="9">PEDIDOS DE MATERIAL</td></tr></table>' +
     '<table class="info" style="margin-top:8px;border:1px solid #ccc"><tbody>' +
       '<tr><td class="l">CONSECUTIVO No.</td><td>' + numPedido + '</td>' +
@@ -1844,6 +2133,15 @@ function imprimirPedido(b, numPedido) {
     '<div class="firma">' +
       '<div>Vo.Bo. Coordinador</div><div>Firma Almacenista</div>' +
     '</div>' +
+    '</div>' +
+    '<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"><\/script>' +
+    '<script>function descargarPdf(){' +
+      'if(!window.html2pdf){alert("El generador de PDF aún está cargando o no hay conexión. Intenta de nuevo, o usa Imprimir > Guardar como PDF.");return;}' +
+      'var b=document.getElementById("btnPdf");b.disabled=true;b.textContent="Generando...";' +
+      'html2pdf().set({margin:8,filename:' + JSON.stringify(nombrePdf) + ',image:{type:"jpeg",quality:0.95},' +
+        'html2canvas:{scale:2},jsPDF:{unit:"mm",format:"letter",orientation:"portrait"}})' +
+        '.from(document.getElementById("doc")).save().then(function(){b.disabled=false;b.textContent="Descargar PDF";});' +
+    '}<\/script>' +
     '</body></html>';
 
   function e(s) { return String(s === null || s === undefined ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
